@@ -1,0 +1,36 @@
+{
+  "scope": "public_student_dataset",
+  "totals": {
+    "patients": 1273,
+    "samples": 12703,
+    "excluded_patients": 2
+  },
+  "patients_by_split": {
+    "test": 176,
+    "train": 1097
+  },
+  "samples_by_split": {
+    "test": 1758,
+    "train": 10945
+  },
+  "patients_by_split_and_pcr": {
+    "test": {
+      "pCR_0": 123,
+      "pCR_1": 53
+    },
+    "train": {
+      "pCR_0": 775,
+      "pCR_1": 322
+    }
+  },
+  "samples_by_split_and_pcr": {
+    "test": {
+      "pCR_0": 1228,
+      "pCR_1": 530
+    },
+    "train": {
+      "pCR_0": 7729,
+      "pCR_1": 3216
+    }
+  }
+}
