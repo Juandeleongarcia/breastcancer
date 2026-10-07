@@ -10,72 +10,49 @@ import torch.nn as nn
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
-    roc_auc_score
+    roc_auc_score,
 )
 
 from torch.utils.data import DataLoader, Dataset
 
-from dataset import BreastDCEDataset
-from model import BreastCancerCNN
-
-
-# =========================================================
-# CONFIGURACIÓN
-# =========================================================
-
-SEED = 42
-
-TRAIN_CSV = "metadata/internal_train.csv"
-VAL_CSV = "metadata/internal_val.csv"
-
-ROOT_DIR = "breastdcedl"
-
-BATCH_SIZE = 8
-LEARNING_RATE = 1e-3
-
-# Para pruebas rápidas en portátil:
-MAX_EPOCHS = 1
-
-# Para entrenamiento serio luego:
-# MAX_EPOCHS = 30
-
-PATIENCE = 5
-
-USE_WEIGHTED_LOSS = True
-
-# ---------------------------------------------------------
-# VARIANTE
-#
-# A = 2 convoluciones + 2 pooling
-# B = 3 convoluciones + 3 pooling
-# C = 3 convoluciones + 2 pooling
-# ---------------------------------------------------------
-
-MODEL_VARIANT = "A"
-
-
-# =========================================================
-# CARPETAS DE SALIDA
-# =========================================================
-
-MODEL_DIR = Path("models")
-
-EXPERIMENT_DIR = (
-    MODEL_DIR / f"model_{MODEL_VARIANT}"
+from config.config import (
+    TRAIN_CSV,
+    VAL_CSV,
+    DATA_DIR,
+    BATCH_SIZE,
+    NUM_WORKERS,
+    EPOCHS,
+    LEARNING_RATE,
+    WEIGHT_DECAY,
+    OPTIMIZER,
+    CLASSIFICATION_THRESHOLD,
+    USE_EARLY_STOPPING,
+    PATIENCE,
+    MODEL_PATH,
+    SAVE_BEST_MODEL,
+    TARGET_ROC_AUC,
+    SEED,
+    USE_GPU,
+    USE_WEIGHTED_LOSS,
 )
 
-EXPERIMENT_DIR.mkdir(
+from src.dataset import BreastDCEDataset
+from src.model import BreastCancerCNN
+from src.metrics import plot_roc_curve
+
+
+# =========================================================
+# RUTAS DE SALIDA
+# =========================================================
+
+MODEL_PATH = Path(MODEL_PATH)
+
+MODEL_PATH.parent.mkdir(
     parents=True,
-    exist_ok=True
+    exist_ok=True,
 )
 
-BEST_MODEL_PATH = (
-    EXPERIMENT_DIR / "best.pt"
-)
-
-HISTORY_PATH = (
-    EXPERIMENT_DIR / "history.csv"
-)
+HISTORY_PATH = MODEL_PATH.parent / "history.csv"
 
 
 # =========================================================
@@ -83,33 +60,38 @@ HISTORY_PATH = (
 # =========================================================
 
 def set_seed(seed):
-
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
     if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 # =========================================================
-# DATASET INTERNO
+# DATASET PARA SPLIT INTERNO
 # =========================================================
 
 class InternalSplitDataset(Dataset):
 
-    def __init__(self, csv_path, root_dir):
-
+    def __init__(
+        self,
+        csv_path,
+        root_dir,
+    ):
         self.df = pd.read_csv(csv_path)
 
         self.base_dataset = BreastDCEDataset(
             csv_path="metadata/samples.csv",
             root_dir=root_dir,
-            split="train"
+            split="train",
         )
 
     def __len__(self):
-
         return len(self.df)
 
     def __getitem__(self, idx):
@@ -130,24 +112,24 @@ class InternalSplitDataset(Dataset):
 
         image = torch.stack(
             [pre, early, late],
-            dim=0
+            dim=0,
         )
 
         label = torch.tensor(
             float(row["pCR"]),
-            dtype=torch.float32
+            dtype=torch.float32,
         )
 
         return {
             "image": image,
             "label": label,
             "patient_id": row["patient_id"],
-            "sample_id": row["sample_id"]
+            "sample_id": row["sample_id"],
         }
 
 
 # =========================================================
-# POS WEIGHT
+# PESO PARA CLASE POSITIVA
 # =========================================================
 
 def calculate_pos_weight(csv_path):
@@ -157,17 +139,23 @@ def calculate_pos_weight(csv_path):
     n0 = (df["pCR"] == 0).sum()
     n1 = (df["pCR"] == 1).sum()
 
+    if n1 == 0:
+        raise ValueError(
+            "No hay muestras positivas (pCR = 1) "
+            "en el conjunto de entrenamiento."
+        )
+
     pos_weight = n0 / n1
 
     print("Muestras no pCR:", n0)
     print("Muestras pCR:", n1)
-    print("pos_weight:", pos_weight)
+    print(f"pos_weight: {pos_weight:.4f}")
 
     return pos_weight
 
 
 # =========================================================
-# TRAIN DE UNA ÉPOCA
+# ENTRENAMIENTO DE UNA ÉPOCA
 # =========================================================
 
 def train_one_epoch(
@@ -175,7 +163,7 @@ def train_one_epoch(
     loader,
     criterion,
     optimizer,
-    device
+    device,
 ):
 
     model.train()
@@ -187,8 +175,15 @@ def train_one_epoch(
 
     for batch in loader:
 
-        images = batch["image"].to(device)
-        labels = batch["label"].to(device)
+        images = batch["image"].to(
+            device,
+            non_blocking=True,
+        )
+
+        labels = batch["label"].to(
+            device,
+            non_blocking=True,
+        )
 
         optimizer.zero_grad()
 
@@ -196,7 +191,7 @@ def train_one_epoch(
 
         loss = criterion(
             logits,
-            labels
+            labels,
         )
 
         loss.backward()
@@ -208,16 +203,20 @@ def train_one_epoch(
             * images.size(0)
         )
 
-        probabilities = torch.sigmoid(
-            logits
-        )
+        probabilities = torch.sigmoid(logits)
 
         all_labels.extend(
-            labels.detach().cpu().numpy()
+            labels
+            .detach()
+            .cpu()
+            .numpy()
         )
 
         all_probabilities.extend(
-            probabilities.detach().cpu().numpy()
+            probabilities
+            .detach()
+            .cpu()
+            .numpy()
         )
 
     epoch_loss = (
@@ -226,27 +225,28 @@ def train_one_epoch(
     )
 
     predictions = [
-        1 if p >= 0.5 else 0
-        for p in all_probabilities
+        1 if probability >= CLASSIFICATION_THRESHOLD else 0
+        for probability in all_probabilities
     ]
 
     accuracy = accuracy_score(
         all_labels,
-        predictions
+        predictions,
     )
 
     try:
         auc = roc_auc_score(
             all_labels,
-            all_probabilities
+            all_probabilities,
         )
+
     except ValueError:
         auc = float("nan")
 
     return (
         epoch_loss,
         accuracy,
-        auc
+        auc,
     )
 
 
@@ -258,7 +258,7 @@ def validate(
     model,
     loader,
     criterion,
-    device
+    device,
 ):
 
     model.eval()
@@ -272,14 +272,21 @@ def validate(
 
         for batch in loader:
 
-            images = batch["image"].to(device)
-            labels = batch["label"].to(device)
+            images = batch["image"].to(
+                device,
+                non_blocking=True,
+            )
+
+            labels = batch["label"].to(
+                device,
+                non_blocking=True,
+            )
 
             logits = model(images).squeeze(1)
 
             loss = criterion(
                 logits,
-                labels
+                labels,
             )
 
             running_loss += (
@@ -287,16 +294,18 @@ def validate(
                 * images.size(0)
             )
 
-            probabilities = torch.sigmoid(
-                logits
-            )
+            probabilities = torch.sigmoid(logits)
 
             all_labels.extend(
-                labels.cpu().numpy()
+                labels
+                .cpu()
+                .numpy()
             )
 
             all_probabilities.extend(
-                probabilities.cpu().numpy()
+                probabilities
+                .cpu()
+                .numpy()
             )
 
     epoch_loss = (
@@ -305,27 +314,28 @@ def validate(
     )
 
     predictions = [
-        1 if p >= 0.5 else 0
-        for p in all_probabilities
+        1 if probability >= CLASSIFICATION_THRESHOLD else 0
+        for probability in all_probabilities
     ]
 
     accuracy = accuracy_score(
         all_labels,
-        predictions
+        predictions,
     )
 
     try:
         auc = roc_auc_score(
             all_labels,
-            all_probabilities
+            all_probabilities,
         )
+
     except ValueError:
         auc = float("nan")
 
     tn, fp, fn, tp = confusion_matrix(
         all_labels,
         predictions,
-        labels=[0, 1]
+        labels=[0, 1],
     ).ravel()
 
     sensitivity = (
@@ -345,7 +355,9 @@ def validate(
         "accuracy": accuracy,
         "auc": auc,
         "sensitivity": sensitivity,
-        "specificity": specificity
+        "specificity": specificity,
+        "labels": all_labels,
+        "probabilities": all_probabilities,
     }
 
 
@@ -361,67 +373,113 @@ def save_checkpoint(
     train_acc,
     train_auc,
     val_metrics,
-    path
+    path,
 ):
 
+    checkpoint = {
+
+        "model_state_dict":
+            model.state_dict(),
+
+        "optimizer_state_dict":
+            optimizer.state_dict(),
+
+        "epoch":
+            epoch,
+
+        "train_loss":
+            train_loss,
+
+        "train_accuracy":
+            train_acc,
+
+        "train_auc":
+            train_auc,
+
+        "val_loss":
+            val_metrics["loss"],
+
+        "val_accuracy":
+            val_metrics["accuracy"],
+
+        "val_auc":
+            val_metrics["auc"],
+
+        "val_sensitivity":
+            val_metrics["sensitivity"],
+
+        "val_specificity":
+            val_metrics["specificity"],
+
+        "seed":
+            SEED,
+
+        "batch_size":
+            BATCH_SIZE,
+
+        "learning_rate":
+            LEARNING_RATE,
+
+        "weight_decay":
+            WEIGHT_DECAY,
+
+        "epochs":
+            EPOCHS,
+
+        "patience":
+            PATIENCE,
+
+        "classification_threshold":
+            CLASSIFICATION_THRESHOLD,
+
+        "weighted_loss":
+            USE_WEIGHTED_LOSS,
+    }
+
     torch.save(
-        {
-            "model_state_dict":
-                model.state_dict(),
-
-            "optimizer_state_dict":
-                optimizer.state_dict(),
-
-            "variant":
-                MODEL_VARIANT,
-
-            "epoch":
-                epoch,
-
-            "train_loss":
-                train_loss,
-
-            "train_accuracy":
-                train_acc,
-
-            "train_auc":
-                train_auc,
-
-            "val_loss":
-                val_metrics["loss"],
-
-            "val_accuracy":
-                val_metrics["accuracy"],
-
-            "val_auc":
-                val_metrics["auc"],
-
-            "val_sensitivity":
-                val_metrics["sensitivity"],
-
-            "val_specificity":
-                val_metrics["specificity"],
-
-            "seed":
-                SEED,
-
-            "batch_size":
-                BATCH_SIZE,
-
-            "learning_rate":
-                LEARNING_RATE,
-
-            "max_epochs":
-                MAX_EPOCHS,
-
-            "patience":
-                PATIENCE,
-
-            "weighted_loss":
-                USE_WEIGHTED_LOSS
-        },
-        path
+        checkpoint,
+        path,
     )
+
+
+# =========================================================
+# OPTIMIZADOR
+# =========================================================
+
+def create_optimizer(model):
+
+    optimizer_name = OPTIMIZER.lower()
+
+    if optimizer_name == "adam":
+
+        return torch.optim.Adam(
+            model.parameters(),
+            lr=LEARNING_RATE,
+            weight_decay=WEIGHT_DECAY,
+        )
+
+    elif optimizer_name == "adamw":
+
+        return torch.optim.AdamW(
+            model.parameters(),
+            lr=LEARNING_RATE,
+            weight_decay=WEIGHT_DECAY,
+        )
+
+    elif optimizer_name == "sgd":
+
+        return torch.optim.SGD(
+            model.parameters(),
+            lr=LEARNING_RATE,
+            momentum=0.9,
+            weight_decay=WEIGHT_DECAY,
+        )
+
+    else:
+
+        raise ValueError(
+            f"Optimizador no reconocido: {OPTIMIZER}"
+        )
 
 
 # =========================================================
@@ -432,11 +490,17 @@ def main():
 
     set_seed(SEED)
 
-    device = torch.device(
-        "cuda"
-        if torch.cuda.is_available()
-        else "cpu"
-    )
+    # -----------------------------------------------------
+    # DISPOSITIVO
+    # -----------------------------------------------------
+
+    if USE_GPU and torch.cuda.is_available():
+
+        device = torch.device("cuda")
+
+    else:
+
+        device = torch.device("cpu")
 
     print()
     print("========================================")
@@ -444,12 +508,30 @@ def main():
     print("========================================")
     print()
 
-    print("Modelo:", MODEL_VARIANT)
     print("Dispositivo:", device)
+
+    if device.type == "cuda":
+
+        print(
+            "GPU:",
+            torch.cuda.get_device_name(0),
+        )
+
+    elif USE_GPU:
+
+        print(
+            "AVISO: USE_GPU=True, "
+            "pero CUDA no está disponible."
+        )
+
     print("Batch size:", BATCH_SIZE)
     print("Learning rate:", LEARNING_RATE)
-    print("Máximo de épocas:", MAX_EPOCHS)
+    print("Weight decay:", WEIGHT_DECAY)
+    print("Optimizador:", OPTIMIZER)
+    print("Máximo de épocas:", EPOCHS)
     print("Patience:", PATIENCE)
+    print("Umbral:", CLASSIFICATION_THRESHOLD)
+    print("Objetivo ROC-AUC:", TARGET_ROC_AUC)
     print("Seed:", SEED)
     print()
 
@@ -459,51 +541,80 @@ def main():
 
     train_dataset = InternalSplitDataset(
         csv_path=TRAIN_CSV,
-        root_dir=ROOT_DIR
+        root_dir=DATA_DIR,
     )
 
     val_dataset = InternalSplitDataset(
         csv_path=VAL_CSV,
-        root_dir=ROOT_DIR
+        root_dir=DATA_DIR,
     )
 
     print(
         "Muestras train:",
-        len(train_dataset)
+        len(train_dataset),
     )
 
     print(
         "Muestras validation:",
-        len(val_dataset)
+        len(val_dataset),
     )
+
+    print()
 
     # -----------------------------------------------------
     # DATALOADERS
     # -----------------------------------------------------
 
+    pin_memory = (
+        device.type == "cuda"
+    )
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=BATCH_SIZE,
         shuffle=True,
-        num_workers=0
+        num_workers=NUM_WORKERS,
+        pin_memory=pin_memory,
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=BATCH_SIZE,
         shuffle=False,
-        num_workers=0
+        num_workers=NUM_WORKERS,
+        pin_memory=pin_memory,
     )
 
     # -----------------------------------------------------
     # MODELO
     # -----------------------------------------------------
 
-    model = BreastCancerCNN(
-        variant=MODEL_VARIANT
-    )
+    model = BreastCancerCNN()
 
     model = model.to(device)
+
+    total_parameters = sum(
+        parameter.numel()
+        for parameter in model.parameters()
+    )
+
+    trainable_parameters = sum(
+        parameter.numel()
+        for parameter in model.parameters()
+        if parameter.requires_grad
+    )
+
+    print(
+        "Parámetros totales:",
+        f"{total_parameters:,}",
+    )
+
+    print(
+        "Parámetros entrenables:",
+        f"{trainable_parameters:,}",
+    )
+
+    print()
 
     # -----------------------------------------------------
     # LOSS
@@ -518,7 +629,7 @@ def main():
         pos_weight = torch.tensor(
             [pos_weight_value],
             dtype=torch.float32,
-            device=device
+            device=device,
         )
 
         criterion = nn.BCEWithLogitsLoss(
@@ -537,20 +648,23 @@ def main():
             "Loss: BCEWithLogitsLoss normal"
         )
 
-    # -----------------------------------------------------
-    # OPTIMIZER
-    # -----------------------------------------------------
-
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=LEARNING_RATE
-    )
+    print()
 
     # -----------------------------------------------------
-    # EARLY STOPPING
+    # OPTIMIZADOR
     # -----------------------------------------------------
+
+    optimizer = create_optimizer(model)
+
+    # -----------------------------------------------------
+    # CONTROL DEL MEJOR MODELO
+    # -----------------------------------------------------
+
+    best_val_auc = float("-inf")
 
     best_val_loss = float("inf")
+
+    best_epoch = 0
 
     epochs_without_improvement = 0
 
@@ -564,7 +678,7 @@ def main():
 
     for epoch in range(
         1,
-        MAX_EPOCHS + 1
+        EPOCHS + 1,
     ):
 
         epoch_start = time.time()
@@ -572,20 +686,20 @@ def main():
         (
             train_loss,
             train_acc,
-            train_auc
+            train_auc,
         ) = train_one_epoch(
-            model,
-            train_loader,
-            criterion,
-            optimizer,
-            device
+            model=model,
+            loader=train_loader,
+            criterion=criterion,
+            optimizer=optimizer,
+            device=device,
         )
 
         val_metrics = validate(
-            model,
-            val_loader,
-            criterion,
-            device
+            model=model,
+            loader=val_loader,
+            criterion=criterion,
+            device=device,
         )
 
         epoch_time = (
@@ -593,25 +707,24 @@ def main():
             - epoch_start
         )
 
-        # -------------------------------------------------
-        # MOSTRAR RESULTADOS
-        # -------------------------------------------------
-
         print()
         print(
-            f"Epoch {epoch}/{MAX_EPOCHS}"
+            f"Epoch {epoch}/{EPOCHS}"
         )
 
         print(
-            f"Train Loss: {train_loss:.4f}"
+            f"Train Loss: "
+            f"{train_loss:.4f}"
         )
 
         print(
-            f"Train Accuracy: {train_acc:.4f}"
+            f"Train Accuracy: "
+            f"{train_acc:.4f}"
         )
 
         print(
-            f"Train AUC: {train_auc:.4f}"
+            f"Train AUC: "
+            f"{train_auc:.4f}"
         )
 
         print(
@@ -644,24 +757,52 @@ def main():
             f"{epoch_time:.2f} s"
         )
 
+        if (
+            not np.isnan(val_metrics["auc"])
+            and val_metrics["auc"] >= TARGET_ROC_AUC
+        ):
+
+            print(
+                f"*** Objetivo ROC-AUC "
+                f"{TARGET_ROC_AUC:.2f} "
+                f"SUPERADO ***"
+            )
+
         # -------------------------------------------------
-        # GUARDAR HISTORIAL
+        # HISTORIAL
         # -------------------------------------------------
 
         epoch_record = {
-            "epoch": epoch,
-            "train_loss": train_loss,
-            "train_accuracy": train_acc,
-            "train_auc": train_auc,
-            "val_loss": val_metrics["loss"],
-            "val_accuracy": val_metrics["accuracy"],
-            "val_auc": val_metrics["auc"],
+
+            "epoch":
+                epoch,
+
+            "train_loss":
+                train_loss,
+
+            "train_accuracy":
+                train_acc,
+
+            "train_auc":
+                train_auc,
+
+            "val_loss":
+                val_metrics["loss"],
+
+            "val_accuracy":
+                val_metrics["accuracy"],
+
+            "val_auc":
+                val_metrics["auc"],
+
             "val_sensitivity":
                 val_metrics["sensitivity"],
+
             "val_specificity":
                 val_metrics["specificity"],
+
             "epoch_time_seconds":
-                epoch_time
+                epoch_time,
         }
 
         history.append(
@@ -672,71 +813,64 @@ def main():
             history
         ).to_csv(
             HISTORY_PATH,
-            index=False
+            index=False,
         )
 
         # -------------------------------------------------
-        # GUARDAR MODELO DE ESTA ÉPOCA
+        # MEJOR MODELO SEGÚN ROC-AUC
         # -------------------------------------------------
 
-        checkpoint_path = (
-            EXPERIMENT_DIR
-            / f"epoch_{epoch:03d}.pt"
+        current_auc = val_metrics["auc"]
+
+        auc_improved = (
+            not np.isnan(current_auc)
+            and current_auc > best_val_auc
         )
 
-        save_checkpoint(
-            model=model,
-            optimizer=optimizer,
-            epoch=epoch,
-            train_loss=train_loss,
-            train_acc=train_acc,
-            train_auc=train_auc,
-            val_metrics=val_metrics,
-            path=checkpoint_path
-        )
+        if auc_improved:
 
-        print(
-            "Checkpoint guardado:",
-            checkpoint_path
-        )
-
-        # -------------------------------------------------
-        # GUARDAR MEJOR MODELO
-        # -------------------------------------------------
-
-        if val_metrics["loss"] < best_val_loss:
+            best_val_auc = current_auc
 
             best_val_loss = (
                 val_metrics["loss"]
             )
 
+            best_epoch = epoch
+
             epochs_without_improvement = 0
 
-            save_checkpoint(
-                model=model,
-                optimizer=optimizer,
-                epoch=epoch,
-                train_loss=train_loss,
-                train_acc=train_acc,
-                train_auc=train_auc,
-                val_metrics=val_metrics,
-                path=BEST_MODEL_PATH
-            )
+            if SAVE_BEST_MODEL:
 
-            print(
-                "Nuevo mejor modelo guardado:",
-                BEST_MODEL_PATH
-            )
+                save_checkpoint(
+                    model=model,
+                    optimizer=optimizer,
+                    epoch=epoch,
+                    train_loss=train_loss,
+                    train_acc=train_acc,
+                    train_auc=train_auc,
+                    val_metrics=val_metrics,
+                    path=MODEL_PATH,
+                )
+
+                print(
+                    "Nuevo mejor modelo guardado:",
+                    MODEL_PATH,
+                )
+
+                print(
+                    f"Mejor Val AUC: "
+                    f"{best_val_auc:.4f}"
+                )
 
         else:
 
             epochs_without_improvement += 1
 
             print(
-                "Sin mejora:",
+                "Sin mejora del AUC:",
                 epochs_without_improvement,
                 "/",
-                PATIENCE
+                PATIENCE,
             )
 
         # -------------------------------------------------
@@ -744,8 +878,8 @@ def main():
         # -------------------------------------------------
 
         if (
-            epochs_without_improvement
-            >= PATIENCE
+            USE_EARLY_STOPPING
+            and epochs_without_improvement >= PATIENCE
         ):
 
             print()
@@ -755,9 +889,55 @@ def main():
 
             break
 
-    # -----------------------------------------------------
+    # =====================================================
+    # CURVA ROC DEL MEJOR MODELO
+    # =====================================================
+
+    if MODEL_PATH.exists():
+
+        print()
+        print(
+            "Cargando mejor modelo para calcular ROC..."
+        )
+
+        checkpoint = torch.load(
+            MODEL_PATH,
+            map_location=device,
+        )
+
+        model.load_state_dict(
+            checkpoint["model_state_dict"]
+        )
+
+        best_val_metrics = validate(
+            model=model,
+            loader=val_loader,
+            criterion=criterion,
+            device=device,
+        )
+
+        roc_path = (
+            MODEL_PATH.parent
+            / "roc_curve.png"
+        )
+
+        plot_roc_curve(
+            labels=best_val_metrics["labels"],
+            probabilities=best_val_metrics["probabilities"],
+            output_path=roc_path,
+            title="ROC Curve - Best Validation Model",
+        )
+
+    else:
+
+        print(
+            "No se encontró un modelo guardado "
+            "para generar la curva ROC."
+        )
+
+    # =====================================================
     # FINAL
-    # -----------------------------------------------------
+    # =====================================================
 
     total_time = (
         time.time()
@@ -766,33 +946,55 @@ def main():
 
     print()
     print("========================================")
-    print("       ENTRENAMIENTO FINALIZADO")
+    print("        ENTRENAMIENTO FINALIZADO")
     print("========================================")
     print()
 
     print(
-        "Modelo:",
-        MODEL_VARIANT
+        "Mejor época:",
+        best_epoch,
     )
 
     print(
-        "Mejor val loss:",
-        best_val_loss
+        "Mejor Val AUC:",
+        f"{best_val_auc:.4f}",
     )
 
     print(
-        "Carpeta experimento:",
-        EXPERIMENT_DIR
+        "Val Loss de la mejor época:",
+        f"{best_val_loss:.4f}",
     )
+
+    print(
+        "Objetivo ROC-AUC:",
+        TARGET_ROC_AUC,
+    )
+
+    if best_val_auc >= TARGET_ROC_AUC:
+
+        print(
+            "Resultado: OBJETIVO SUPERADO"
+        )
+
+    else:
+
+        print(
+            "Resultado: objetivo todavía no alcanzado"
+        )
 
     print(
         "Mejor modelo:",
-        BEST_MODEL_PATH
+        MODEL_PATH,
     )
 
     print(
         "Historial:",
-        HISTORY_PATH
+        HISTORY_PATH,
+    )
+
+    print(
+        "Curva ROC:",
+        MODEL_PATH.parent / "roc_curve.png",
     )
 
     print(
@@ -803,40 +1005,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# -------------------------------------------------------------------------
-# NOTA
-#
-# Cada entrenamiento guarda automáticamente:
-#
-#   models/model_A/epoch_001.pt
-#   models/model_A/epoch_002.pt
-#   ...
-#   models/model_A/best.pt
-#   models/model_A/history.csv
-#
-# y lo mismo para B y C.
-#
-# Cada checkpoint contiene:
-#
-#   - pesos de la CNN
-#   - estado del optimizador
-#   - arquitectura
-#   - época
-#   - train loss
-#   - train accuracy
-#   - train AUC
-#   - validation loss
-#   - validation accuracy
-#   - validation AUC
-#   - sensibilidad
-#   - especificidad
-#   - seed
-#   - batch size
-#   - learning rate
-#   - configuración de la loss
-#
-# Así ningún modelo entrenado se pierde y se pueden comparar después todos
-# los experimentos realizados.
-# -------------------------------------------------------------------------

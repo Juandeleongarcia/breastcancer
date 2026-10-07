@@ -1,104 +1,72 @@
 import torch
 import torch.nn as nn
 
+from config.config import (
+    INPUT_CHANNELS,
+    CONV_CHANNELS,
+    KERNEL_SIZE,
+    PADDING,
+    POOL_SIZE,
+    USE_BATCH_NORM,
+    DROPOUT,
+)
+
 
 class BreastCancerCNN(nn.Module):
-    def __init__(self, variant="B"):
+
+    def __init__(self):
         super().__init__()
 
-        self.variant = variant
+        layers = []
+        in_channels = INPUT_CHANNELS
 
-        if variant == "A":
-            # 2 convoluciones + 2 pooling
-            self.features = nn.Sequential(
-                nn.Conv2d(3, 32, kernel_size=3, padding=1),
-                nn.BatchNorm2d(32),
-                nn.ReLU(),
-                nn.MaxPool2d(2),
+        # Construcción automática de los bloques convolucionales
+        for out_channels in CONV_CHANNELS:
 
-                nn.Conv2d(32, 64, kernel_size=3, padding=1),
-                nn.BatchNorm2d(64),
-                nn.ReLU(),
-                nn.MaxPool2d(2),
-
-                nn.AdaptiveAvgPool2d((1, 1))
+            layers.append(
+                nn.Conv2d(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    kernel_size=KERNEL_SIZE,
+                    padding=PADDING,
+                )
             )
 
-            final_features = 64
+            if USE_BATCH_NORM:
+                layers.append(
+                    nn.BatchNorm2d(out_channels)
+                )
 
-        elif variant == "B":
-            # 3 convoluciones + 3 pooling
-            self.features = nn.Sequential(
-                nn.Conv2d(3, 32, kernel_size=3, padding=1),
-                nn.BatchNorm2d(32),
-                nn.ReLU(),
-                nn.MaxPool2d(2),
+            layers.append(nn.ReLU())
 
-                nn.Conv2d(32, 64, kernel_size=3, padding=1),
-                nn.BatchNorm2d(64),
-                nn.ReLU(),
-                nn.MaxPool2d(2),
-
-                nn.Conv2d(64, 128, kernel_size=3, padding=1),
-                nn.BatchNorm2d(128),
-                nn.ReLU(),
-                nn.MaxPool2d(2),
-
-                nn.AdaptiveAvgPool2d((1, 1))
+            layers.append(
+                nn.MaxPool2d(
+                    kernel_size=POOL_SIZE
+                )
             )
 
-            final_features = 128
+            in_channels = out_channels
 
-        elif variant == "C":
-            # 3 convoluciones + 2 pooling
-            self.features = nn.Sequential(
-                nn.Conv2d(3, 32, kernel_size=3, padding=1),
-                nn.BatchNorm2d(32),
-                nn.ReLU(),
-                nn.MaxPool2d(2),
+        # Reduce cada mapa de características a 1x1
+        layers.append(
+            nn.AdaptiveAvgPool2d((1, 1))
+        )
 
-                nn.Conv2d(32, 64, kernel_size=3, padding=1),
-                nn.BatchNorm2d(64),
-                nn.ReLU(),
-                nn.MaxPool2d(2),
+        self.features = nn.Sequential(*layers)
 
-                nn.Conv2d(64, 128, kernel_size=3, padding=1),
-                nn.BatchNorm2d(128),
-                nn.ReLU(),
-
-                nn.AdaptiveAvgPool2d((1, 1))
-            )
-
-            final_features = 128
-
-        else:
-            raise ValueError(
-                f"Variant '{variant}' no válida. Usa A, B o C."
-            )
-
+        # Clasificador binario
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Dropout(0.4),
-            nn.Linear(final_features, 1)
+            nn.Dropout(DROPOUT),
+            nn.Linear(
+                CONV_CHANNELS[-1],
+                1
+            ),
         )
 
     def forward(self, x):
+
         x = self.features(x)
         x = self.classifier(x)
+
         return x
-
-
-if __name__ == "__main__":
-
-    x = torch.randn(2, 3, 256, 256)
-
-    for variant in ["A", "B", "C"]:
-        model = BreastCancerCNN(variant=variant)
-        output = model(x)
-
-        print()
-        print("===================================")
-        print("Modelo:", variant)
-        print("Entrada:", x.shape)
-        print("Salida:", output.shape)
-        print("===================================")
