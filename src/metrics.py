@@ -175,3 +175,135 @@ def calculate_confusion_metrics(
         "negative_predictive_value":
             negative_predictive_value,
     }
+
+def plot_training_history(
+    history_path="models/history.csv",
+    output_dir="models",
+):
+    """
+    Genera las curvas de entrenamiento:
+    - Train Loss vs Validation Loss
+    - Train Accuracy vs Validation Accuracy
+    - Train AUC vs Validation AUC
+    """
+
+    import pandas as pd
+
+    history = pd.read_csv(history_path)
+
+    output_dir = Path(output_dir)
+
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    # =====================================================
+    # LOSS
+    # =====================================================
+
+    plt.figure(figsize=(7, 6))
+
+    plt.plot(
+        history["epoch"],
+        history["train_loss"],
+        label="Train Loss",
+    )
+
+    plt.plot(
+        history["epoch"],
+        history["val_loss"],
+        label="Validation Loss",
+    )
+
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Training and Validation Loss")
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+
+    plt.savefig(
+        output_dir / "loss_curve.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+
+    plt.close()
+
+    # =====================================================
+    # ACCURACY
+    # =====================================================
+
+    plt.figure(figsize=(7, 6))
+
+    plt.plot(
+        history["epoch"],
+        history["train_accuracy"],
+        label="Train Accuracy",
+    )
+
+    plt.plot(
+        history["epoch"],
+        history["val_accuracy"],
+        label="Validation Accuracy",
+    )
+
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.title("Training and Validation Accuracy")
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+
+    plt.savefig(
+        output_dir / "accuracy_curve.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+
+    plt.close()
+
+    # =====================================================
+    # AUC
+    # =====================================================
+
+    plt.figure(figsize=(7, 6))
+
+    plt.plot(
+        history["epoch"],
+        history["train_auc"],
+        label="Train AUC",
+    )
+
+    plt.plot(
+        history["epoch"],
+        history["val_auc"],
+        label="Validation AUC",
+    )
+
+    plt.axhline(
+        y=0.70,
+        linestyle="--",
+        label="Target AUC = 0.70",
+    )
+
+    plt.xlabel("Epoch")
+    plt.ylabel("ROC-AUC")
+    plt.title("Training and Validation ROC-AUC")
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+
+    plt.savefig(
+        output_dir / "auc_curve.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+
+    plt.close()
+
+    print(
+        "Curvas de entrenamiento guardadas en:",
+        output_dir,
+    )

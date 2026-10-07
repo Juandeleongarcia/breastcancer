@@ -3,8 +3,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+
 from PIL import Image
 from torch.utils.data import Dataset
+
+from config.config import (
+    IMAGE_SIZE,
+    INPUT_MODE,
+    USE_STANDARDIZATION,
+    CHANNEL_MEANS,
+    CHANNEL_STDS,
+)
 
 
 class BreastDCEDataset(Dataset):
@@ -12,189 +21,442 @@ class BreastDCEDataset(Dataset):
         self,
         csv_path="metadata/samples.csv",
         root_dir="breastdcedl",
-        split="train"
+        split=None,
     ):
         """
-        Dataset para cargar muestras BreastDCEDL.
+        Dataset para BreastDCEDL.
 
-        Cada muestra está formada por tres fases de DCE-MRI:
-        PRE, EARLY y LATE.
+        Modos de entrada controlados desde config.py:
 
-        Las tres imágenes se apilan como tres canales para formar
-        un tensor de tamaño [3, 256, 256].
+        INPUT_MODE = "raw"
+            canal 0 -> PRE
+            canal 1 -> EARLY
+            canal 2 -> LATE
+
+        INPUT_MODE = "enhancement"
+            canal 0 -> PRE
+            canal 1 -> EARLY - PRE
+            canal 2 -> LATE - PRE
+
+        Si split=None se utilizan todas las filas del CSV.
+        Esto es lo que usamos con internal_train.csv
+        e internal_val.csv, porque ya están separados.
         """
 
         self.root_dir = Path(root_dir)
 
-        # Leemos el CSV con la información de todas las muestras
-        self.df = pd.read_csv(csv_path)
-
-        # Filtramos por el split deseado
-        self.df = self.df[self.df["split"] == split].reset_index(drop=True)
-
-        if len(self.df) == 0:
-            raise ValueError(
-                f"No se encontraron muestras para el split '{split}'"
-            )
-
-    def __len__(self):
-        """
-        Devuelve el número total de muestras disponibles.
-        """
-        return len(self.df)
-
-    def _load_grayscale_image(self, relative_path):
-        """
-        Carga una imagen PNG en escala de grises.
-
-        La imagen original está almacenada en uint8 con valores
-        entre 0 y 255.
-
-        Se convierte a float32 y se normaliza al intervalo [0, 1].
-        """
-
-        image_path = self.root_dir / relative_path
-
-        if not image_path.exists():
-            raise FileNotFoundError(
-                f"No se encontró la imagen:\n{image_path}"
-            )
-
-        # Abrimos la imagen y forzamos escala de grises
-        image = Image.open(image_path).convert("L")
-
-        # Comprobamos el tamaño esperado
-        if image.size != (256, 256):
-            raise ValueError(
-                f"La imagen {image_path} tiene tamaño {image.size}, "
-                "pero se esperaba (256, 256)"
-            )
-
-        # Convertimos la imagen PIL a array NumPy float32
-        image_array = np.array(
-            image,
-            dtype=np.float32
+        self.df = pd.read_csv(
+            csv_path
         )
 
-        # Convertimos a tensor PyTorch
-        image_tensor = torch.from_numpy(image_array)
+        # =================================================
+        # SPLIT
+        # =================================================
 
-        # Normalización [0, 255] -> [0, 1]
-        image_tensor = image_tensor / 255.0
+        if (
+            split is not None
+            and "split" in self.df.columns
+        ):
+
+            self.df = (
+                self.df[
+                    self.df["split"] == split
+                ]
+                .reset_index(drop=True)
+            )
+
+        else:
+
+            self.df = (
+                self.df
+                .reset_index(drop=True)
+            )
+
+        if len(self.df) == 0:
+
+            raise ValueError(
+                f"No se encontraron muestras "
+                f"en {csv_path}"
+            )
+
+        # =================================================
+        # COMPROBACIÓN INPUT MODE
+        # =================================================
+
+        valid_input_modes = [
+            "raw",
+            "enhancement",
+        ]
+
+        if INPUT_MODE not in valid_input_modes:
+
+            raise ValueError(
+                f"INPUT_MODE='{INPUT_MODE}' no válido. "
+                f"Opciones: {valid_input_modes}"
+            )
+
+        # =================================================
+        # COMPROBACIÓN ESTANDARIZACIÓN
+        # =================================================
+
+        if USE_STANDARDIZATION:
+
+            if len(CHANNEL_MEANS) != 3:
+
+                raise ValueError(
+                    "CHANNEL_MEANS debe tener 3 valores."
+                )
+
+            if len(CHANNEL_STDS) != 3:
+
+                raise ValueError(
+                    "CHANNEL_STDS debe tener 3 valores."
+                )
+
+            if any(
+                std <= 0
+                for std in CHANNEL_STDS
+            ):
+
+                raise ValueError(
+                    "Todos los CHANNEL_STDS "
+                    "deben ser mayores que 0."
+                )
+
+    def __len__(self):
+
+        return len(self.df)
+
+    # =====================================================
+    # CARGA DE IMAGEN
+    # =====================================================
+
+    def _load_grayscale_image(
+        self,
+        relative_path,
+    ):
+
+        image_path = (
+            self.root_dir
+            / relative_path
+        )
+
+        if not image_path.exists():
+
+            raise FileNotFoundError(
+                f"No se encontró la imagen:\n"
+                f"{image_path}"
+            )
+
+        image = (
+            Image.open(image_path)
+            .convert("L")
+        )
+
+        expected_size = (
+            IMAGE_SIZE,
+            IMAGE_SIZE,
+        )
+
+        if image.size != expected_size:
+
+            raise ValueError(
+                f"La imagen {image_path} "
+                f"tiene tamaño {image.size}, "
+                f"pero se esperaba {expected_size}"
+            )
+
+        image_array = np.array(
+            image,
+            dtype=np.float32,
+        )
+
+        image_tensor = (
+            torch.from_numpy(
+                image_array
+            )
+        )
+
+        # [0, 255] -> [0, 1]
+        image_tensor = (
+            image_tensor / 255.0
+        )
 
         return image_tensor
 
-    def __getitem__(self, idx):
-        """
-        Devuelve una muestra del dataset.
-        """
+    # =====================================================
+    # CONSTRUCCIÓN DE CANALES
+    # =====================================================
 
-        row = self.df.iloc[idx]
+    def _build_channels(
+        self,
+        pre,
+        early,
+        late,
+    ):
 
-        # Cargamos las tres fases correspondientes
-        # al mismo corte anatómico
-        pre = self._load_grayscale_image(row["path_pre"])
-        early = self._load_grayscale_image(row["path_early"])
-        late = self._load_grayscale_image(row["path_late"])
+        if INPUT_MODE == "raw":
 
-        # Apilamos las tres fases en el orden correcto:
-        # canal 0 -> PRE
-        # canal 1 -> EARLY
-        # canal 2 -> LATE
-        #
-        # Resultado: [3, 256, 256]
+            channels = [
+                pre,
+                early,
+                late,
+            ]
+
+        elif INPUT_MODE == "enhancement":
+
+            early_enhancement = (
+                early - pre
+            )
+
+            late_enhancement = (
+                late - pre
+            )
+
+            channels = [
+                pre,
+                early_enhancement,
+                late_enhancement,
+            ]
+
+        else:
+
+            raise ValueError(
+                f"INPUT_MODE no reconocido: "
+                f"{INPUT_MODE}"
+            )
+
         image = torch.stack(
-            [pre, early, late],
-            dim=0
+            channels,
+            dim=0,
         )
 
-        # Etiqueta binaria:
-        # 1 -> pCR
-        # 0 -> no pCR
+        return image
+
+    # =====================================================
+    # ESTANDARIZACIÓN
+    # =====================================================
+
+    def _standardize(
+        self,
+        image,
+    ):
+
+        if not USE_STANDARDIZATION:
+
+            return image
+
+        image = image.clone()
+
+        for channel_index in range(3):
+
+            mean = (
+                CHANNEL_MEANS[
+                    channel_index
+                ]
+            )
+
+            std = (
+                CHANNEL_STDS[
+                    channel_index
+                ]
+            )
+
+            image[
+                channel_index
+            ] = (
+                image[
+                    channel_index
+                ]
+                - mean
+            ) / std
+
+        return image
+
+    # =====================================================
+    # GETITEM
+    # =====================================================
+
+    def __getitem__(
+        self,
+        idx,
+    ):
+
+        row = (
+            self.df.iloc[idx]
+        )
+
+        pre = (
+            self._load_grayscale_image(
+                row["path_pre"]
+            )
+        )
+
+        early = (
+            self._load_grayscale_image(
+                row["path_early"]
+            )
+        )
+
+        late = (
+            self._load_grayscale_image(
+                row["path_late"]
+            )
+        )
+
+        image = (
+            self._build_channels(
+                pre=pre,
+                early=early,
+                late=late,
+            )
+        )
+
+        image = (
+            self._standardize(
+                image
+            )
+        )
+
         label = torch.tensor(
-            float(row["pCR"]),
-            dtype=torch.float32
+            float(
+                row["pCR"]
+            ),
+            dtype=torch.float32,
         )
 
-        return {
-            "image": image,
-            "label": label,
-            "patient_id": row["patient_id"],
-            "sample_id": row["sample_id"],
-            "slice_index": row["slice_index"]
+        sample = {
+
+            "image":
+                image,
+
+            "label":
+                label,
+
+            "patient_id":
+                row["patient_id"],
+
+            "sample_id":
+                row["sample_id"],
         }
 
+        if "slice_index" in row.index:
+
+            sample[
+                "slice_index"
+            ] = (
+                row["slice_index"]
+            )
+
+        return sample
+
+
+# =========================================================
+# TEST
+# =========================================================
 
 if __name__ == "__main__":
 
-    # Creamos el dataset de entrenamiento
     dataset = BreastDCEDataset(
         csv_path="metadata/samples.csv",
         root_dir="breastdcedl",
-        split="train"
+        split="train",
     )
 
-    print("Número de muestras:", len(dataset))
+    print()
 
-    # Cargamos la primera muestra real
+    print(
+        "========================================"
+    )
+
+    print(
+        "        TEST BREASTDCEDATASET"
+    )
+
+    print(
+        "========================================"
+    )
+
+    print()
+
+    print(
+        "INPUT_MODE:",
+        INPUT_MODE,
+    )
+
+    print(
+        "USE_STANDARDIZATION:",
+        USE_STANDARDIZATION,
+    )
+
+    print(
+        "Número de muestras:",
+        len(dataset),
+    )
+
+    print()
+
     sample = dataset[0]
 
-    print("Sample ID:", sample["sample_id"])
-    print("Patient ID:", sample["patient_id"])
-    print("Slice:", sample["slice_index"])
-
-    print("Forma de la imagen:", sample["image"].shape)
-    print("Etiqueta pCR:", sample["label"])
-
-    print("Valor mínimo:", sample["image"].min().item())
-    print("Valor máximo:", sample["image"].max().item())
-
     print(
-        "Media PRE:",
-        sample["image"][0].mean().item()
+        "Sample ID:",
+        sample["sample_id"],
     )
 
     print(
-        "Media EARLY:",
-        sample["image"][1].mean().item()
+        "Patient ID:",
+        sample["patient_id"],
+    )
+
+    if "slice_index" in sample:
+
+        print(
+            "Slice:",
+            sample["slice_index"],
+        )
+
+    print(
+        "Forma:",
+        sample["image"].shape,
     )
 
     print(
-        "Media LATE:",
-        sample["image"][2].mean().item()
+        "Etiqueta:",
+        sample["label"],
     )
 
+    print()
 
-# -------------------------------------------------------------------------
-# NOTA SOBRE EL DATASET
-#
-# Cada muestra está formada por tres imágenes correspondientes al mismo
-# corte anatómico de una paciente:
-#
-#   canal 0 -> PRE
-#   canal 1 -> EARLY
-#   canal 2 -> LATE
-#
-# Las imágenes son PNG en escala de grises de tamaño 256x256.
-#
-# Los valores originales se encuentran entre 0 y 255 y se dividen entre
-# 255 para trabajar en el intervalo [0, 1].
-#
-# Las tres fases se apilan para obtener un tensor:
-#
-#   [3, 256, 256]
-#
-# Este es el formato de entrada que utiliza nuestra CNN.
-#
-# Es fundamental mantener PRE, EARLY y LATE correctamente alineadas.
-# Si posteriormente se aplica data augmentation, cualquier transformación
-# geométrica deberá aplicarse exactamente igual a las tres fases.
-#
-# La etiqueta pCR es binaria:
-#
-#   pCR = 1  -> respuesta patológica completa
-#   pCR = 0  -> no respuesta patológica completa
-#
-# La división train/validation/test debe respetar siempre la unidad paciente
-# para evitar data leakage entre cortes de una misma paciente.
-# -------------------------------------------------------------------------
+    for channel_index in range(3):
+
+        channel = (
+            sample["image"][
+                channel_index
+            ]
+        )
+
+        print(
+            f"Canal {channel_index}"
+        )
+
+        print(
+            "  Min:",
+            channel.min().item(),
+        )
+
+        print(
+            "  Max:",
+            channel.max().item(),
+        ) 
+
+        print(
+            "  Mean:",
+            channel.mean().item(),
+        )
+
+        print(
+            "  Std:",
+            channel.std().item(),
+        )
+
+        print()

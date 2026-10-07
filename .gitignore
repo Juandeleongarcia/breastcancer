@@ -219,3 +219,5 @@ __marimo__/
 
 # Dataset local
 dataset/
+
+models/

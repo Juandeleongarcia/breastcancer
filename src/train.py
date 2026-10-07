@@ -1,4 +1,5 @@
 import random
+import shutil
 import time
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 
 from config.config import (
     TRAIN_CSV,
@@ -28,8 +29,6 @@ from config.config import (
     CLASSIFICATION_THRESHOLD,
     USE_EARLY_STOPPING,
     PATIENCE,
-    MODEL_PATH,
-    SAVE_BEST_MODEL,
     TARGET_ROC_AUC,
     SEED,
     USE_GPU,
@@ -38,124 +37,180 @@ from config.config import (
 
 from src.dataset import BreastDCEDataset
 from src.model import BreastCancerCNN
-from src.metrics import plot_roc_curve
+
+from src.metrics import (
+    plot_roc_curve,
+    plot_training_history,
+)
 
 
 # =========================================================
-# RUTAS DE SALIDA
+# RUTAS
 # =========================================================
 
-MODEL_PATH = Path(MODEL_PATH)
+MODELS_DIR = Path("models")
+CONFIG_PATH = Path("config/config.py")
 
-MODEL_PATH.parent.mkdir(
+MODELS_DIR.mkdir(
     parents=True,
     exist_ok=True,
 )
 
-HISTORY_PATH = MODEL_PATH.parent / "history.csv"
+
+# =========================================================
+# CREACIÓN AUTOMÁTICA DE RUN
+# =========================================================
+
+def create_run_directory():
+
+    existing_runs = []
+
+    for path in MODELS_DIR.iterdir():
+
+        if (
+            path.is_dir()
+            and path.name.startswith("run_")
+        ):
+
+            try:
+
+                run_number = int(
+                    path.name.split("_")[1]
+                )
+
+                existing_runs.append(
+                    run_number
+                )
+
+            except (
+                IndexError,
+                ValueError,
+            ):
+                pass
+
+    if existing_runs:
+
+        next_number = (
+            max(existing_runs) + 1
+        )
+
+    else:
+
+        next_number = 1
+
+    run_dir = (
+        MODELS_DIR
+        / f"run_{next_number:03d}"
+    )
+
+    run_dir.mkdir(
+        parents=True,
+        exist_ok=False,
+    )
+
+    return run_dir
+
+
+# =========================================================
+# COPIA DEL CONFIG
+# =========================================================
+
+def copy_config(
+    run_dir,
+):
+
+    shutil.copy2(
+        CONFIG_PATH,
+        run_dir / "config.py",
+    )
 
 
 # =========================================================
 # REPRODUCIBILIDAD
 # =========================================================
 
-def set_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+def set_seed(
+    seed,
+):
+
+    random.seed(
+        seed
+    )
+
+    np.random.seed(
+        seed
+    )
+
+    torch.manual_seed(
+        seed
+    )
 
     if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
+
+        torch.cuda.manual_seed(
+            seed
+        )
+
+        torch.cuda.manual_seed_all(
+            seed
+        )
 
     torch.backends.cudnn.deterministic = True
+
     torch.backends.cudnn.benchmark = False
 
 
 # =========================================================
-# DATASET PARA SPLIT INTERNO
+# PESO CLASE POSITIVA
 # =========================================================
 
-class InternalSplitDataset(Dataset):
+def calculate_pos_weight(
+    csv_path,
+):
 
-    def __init__(
-        self,
-        csv_path,
-        root_dir,
-    ):
-        self.df = pd.read_csv(csv_path)
+    df = pd.read_csv(
+        csv_path
+    )
 
-        self.base_dataset = BreastDCEDataset(
-            csv_path="metadata/samples.csv",
-            root_dir=root_dir,
-            split="train",
-        )
+    n0 = (
+        df["pCR"] == 0
+    ).sum()
 
-    def __len__(self):
-        return len(self.df)
-
-    def __getitem__(self, idx):
-
-        row = self.df.iloc[idx]
-
-        pre = self.base_dataset._load_grayscale_image(
-            row["path_pre"]
-        )
-
-        early = self.base_dataset._load_grayscale_image(
-            row["path_early"]
-        )
-
-        late = self.base_dataset._load_grayscale_image(
-            row["path_late"]
-        )
-
-        image = torch.stack(
-            [pre, early, late],
-            dim=0,
-        )
-
-        label = torch.tensor(
-            float(row["pCR"]),
-            dtype=torch.float32,
-        )
-
-        return {
-            "image": image,
-            "label": label,
-            "patient_id": row["patient_id"],
-            "sample_id": row["sample_id"],
-        }
-
-
-# =========================================================
-# PESO PARA CLASE POSITIVA
-# =========================================================
-
-def calculate_pos_weight(csv_path):
-
-    df = pd.read_csv(csv_path)
-
-    n0 = (df["pCR"] == 0).sum()
-    n1 = (df["pCR"] == 1).sum()
+    n1 = (
+        df["pCR"] == 1
+    ).sum()
 
     if n1 == 0:
+
         raise ValueError(
-            "No hay muestras positivas (pCR = 1) "
-            "en el conjunto de entrenamiento."
+            "No hay muestras positivas "
+            "(pCR = 1) en entrenamiento."
         )
 
-    pos_weight = n0 / n1
+    pos_weight = (
+        n0 / n1
+    )
 
-    print("Muestras no pCR:", n0)
-    print("Muestras pCR:", n1)
-    print(f"pos_weight: {pos_weight:.4f}")
+    print(
+        "Muestras no pCR:",
+        n0,
+    )
+
+    print(
+        "Muestras pCR:",
+        n1,
+    )
+
+    print(
+        f"pos_weight: "
+        f"{pos_weight:.4f}"
+    )
 
     return pos_weight
 
 
 # =========================================================
-# ENTRENAMIENTO DE UNA ÉPOCA
+# TRAIN EPOCH
 # =========================================================
 
 def train_one_epoch(
@@ -171,23 +226,35 @@ def train_one_epoch(
     running_loss = 0.0
 
     all_labels = []
+
     all_probabilities = []
 
     for batch in loader:
 
-        images = batch["image"].to(
-            device,
-            non_blocking=True,
+        images = (
+            batch["image"]
+            .to(
+                device,
+                non_blocking=True,
+            )
         )
 
-        labels = batch["label"].to(
-            device,
-            non_blocking=True,
+        labels = (
+            batch["label"]
+            .to(
+                device,
+                non_blocking=True,
+            )
         )
 
         optimizer.zero_grad()
 
-        logits = model(images).squeeze(1)
+        logits = (
+            model(
+                images
+            )
+            .squeeze(1)
+        )
 
         loss = criterion(
             logits,
@@ -203,13 +270,18 @@ def train_one_epoch(
             * images.size(0)
         )
 
-        probabilities = torch.sigmoid(logits)
+        probabilities = (
+            torch.sigmoid(
+                logits
+            )
+        )
 
         all_labels.extend(
             labels
             .detach()
             .cpu()
             .numpy()
+            .tolist()
         )
 
         all_probabilities.extend(
@@ -217,6 +289,7 @@ def train_one_epoch(
             .detach()
             .cpu()
             .numpy()
+            .tolist()
         )
 
     epoch_loss = (
@@ -225,8 +298,12 @@ def train_one_epoch(
     )
 
     predictions = [
-        1 if probability >= CLASSIFICATION_THRESHOLD else 0
-        for probability in all_probabilities
+        1
+        if probability
+        >= CLASSIFICATION_THRESHOLD
+        else 0
+        for probability
+        in all_probabilities
     ]
 
     accuracy = accuracy_score(
@@ -235,13 +312,17 @@ def train_one_epoch(
     )
 
     try:
+
         auc = roc_auc_score(
             all_labels,
             all_probabilities,
         )
 
     except ValueError:
-        auc = float("nan")
+
+        auc = float(
+            "nan"
+        )
 
     return (
         epoch_loss,
@@ -266,23 +347,35 @@ def validate(
     running_loss = 0.0
 
     all_labels = []
+
     all_probabilities = []
 
     with torch.no_grad():
 
         for batch in loader:
 
-            images = batch["image"].to(
-                device,
-                non_blocking=True,
+            images = (
+                batch["image"]
+                .to(
+                    device,
+                    non_blocking=True,
+                )
             )
 
-            labels = batch["label"].to(
-                device,
-                non_blocking=True,
+            labels = (
+                batch["label"]
+                .to(
+                    device,
+                    non_blocking=True,
+                )
             )
 
-            logits = model(images).squeeze(1)
+            logits = (
+                model(
+                    images
+                )
+                .squeeze(1)
+            )
 
             loss = criterion(
                 logits,
@@ -294,18 +387,24 @@ def validate(
                 * images.size(0)
             )
 
-            probabilities = torch.sigmoid(logits)
+            probabilities = (
+                torch.sigmoid(
+                    logits
+                )
+            )
 
             all_labels.extend(
                 labels
                 .cpu()
                 .numpy()
+                .tolist()
             )
 
             all_probabilities.extend(
                 probabilities
                 .cpu()
                 .numpy()
+                .tolist()
             )
 
     epoch_loss = (
@@ -314,8 +413,12 @@ def validate(
     )
 
     predictions = [
-        1 if probability >= CLASSIFICATION_THRESHOLD else 0
-        for probability in all_probabilities
+        1
+        if probability
+        >= CLASSIFICATION_THRESHOLD
+        else 0
+        for probability
+        in all_probabilities
     ]
 
     accuracy = accuracy_score(
@@ -324,19 +427,25 @@ def validate(
     )
 
     try:
+
         auc = roc_auc_score(
             all_labels,
             all_probabilities,
         )
 
     except ValueError:
-        auc = float("nan")
 
-    tn, fp, fn, tp = confusion_matrix(
-        all_labels,
-        predictions,
-        labels=[0, 1],
-    ).ravel()
+        auc = float(
+            "nan"
+        )
+
+    tn, fp, fn, tp = (
+        confusion_matrix(
+            all_labels,
+            predictions,
+            labels=[0, 1],
+        ).ravel()
+    )
 
     sensitivity = (
         tp / (tp + fn)
@@ -351,21 +460,35 @@ def validate(
     )
 
     return {
-        "loss": epoch_loss,
-        "accuracy": accuracy,
-        "auc": auc,
-        "sensitivity": sensitivity,
-        "specificity": specificity,
-        "labels": all_labels,
-        "probabilities": all_probabilities,
+
+        "loss":
+            epoch_loss,
+
+        "accuracy":
+            accuracy,
+
+        "auc":
+            auc,
+
+        "sensitivity":
+            sensitivity,
+
+        "specificity":
+            specificity,
+
+        "labels":
+            all_labels,
+
+        "probabilities":
+            all_probabilities,
     }
 
 
 # =========================================================
-# GUARDAR CHECKPOINT
+# CHECKPOINT
 # =========================================================
 
-def save_checkpoint(
+def save_epoch_checkpoint(
     model,
     optimizer,
     epoch,
@@ -373,19 +496,19 @@ def save_checkpoint(
     train_acc,
     train_auc,
     val_metrics,
-    path,
+    run_dir,
 ):
 
     checkpoint = {
+
+        "epoch":
+            epoch,
 
         "model_state_dict":
             model.state_dict(),
 
         "optimizer_state_dict":
             optimizer.state_dict(),
-
-        "epoch":
-            epoch,
 
         "train_loss":
             train_loss,
@@ -423,6 +546,9 @@ def save_checkpoint(
         "weight_decay":
             WEIGHT_DECAY,
 
+        "optimizer":
+            OPTIMIZER,
+
         "epochs":
             EPOCHS,
 
@@ -436,19 +562,30 @@ def save_checkpoint(
             USE_WEIGHTED_LOSS,
     }
 
+    epoch_path = (
+        run_dir
+        / f"epoch_{epoch:03d}.pt"
+    )
+
     torch.save(
         checkpoint,
-        path,
+        epoch_path,
     )
+
+    return epoch_path
 
 
 # =========================================================
 # OPTIMIZADOR
 # =========================================================
 
-def create_optimizer(model):
+def create_optimizer(
+    model,
+):
 
-    optimizer_name = OPTIMIZER.lower()
+    optimizer_name = (
+        OPTIMIZER.lower()
+    )
 
     if optimizer_name == "adam":
 
@@ -458,7 +595,7 @@ def create_optimizer(model):
             weight_decay=WEIGHT_DECAY,
         )
 
-    elif optimizer_name == "adamw":
+    if optimizer_name == "adamw":
 
         return torch.optim.AdamW(
             model.parameters(),
@@ -466,7 +603,7 @@ def create_optimizer(model):
             weight_decay=WEIGHT_DECAY,
         )
 
-    elif optimizer_name == "sgd":
+    if optimizer_name == "sgd":
 
         return torch.optim.SGD(
             model.parameters(),
@@ -475,11 +612,10 @@ def create_optimizer(model):
             weight_decay=WEIGHT_DECAY,
         )
 
-    else:
-
-        raise ValueError(
-            f"Optimizador no reconocido: {OPTIMIZER}"
-        )
+    raise ValueError(
+        "Optimizador no reconocido: "
+        f"{OPTIMIZER}"
+    )
 
 
 # =========================================================
@@ -488,65 +624,138 @@ def create_optimizer(model):
 
 def main():
 
-    set_seed(SEED)
+    run_dir = (
+        create_run_directory()
+    )
 
-    # -----------------------------------------------------
+    history_path = (
+        run_dir
+        / "history.csv"
+    )
+
+    copy_config(
+        run_dir
+    )
+
+    set_seed(
+        SEED
+    )
+
+    # =====================================================
     # DISPOSITIVO
-    # -----------------------------------------------------
+    # =====================================================
 
-    if USE_GPU and torch.cuda.is_available():
+    if (
+        USE_GPU
+        and torch.cuda.is_available()
+    ):
 
-        device = torch.device("cuda")
+        device = torch.device(
+            "cuda"
+        )
 
     else:
 
-        device = torch.device("cpu")
+        device = torch.device(
+            "cpu"
+        )
 
     print()
-    print("========================================")
-    print("        ENTRENAMIENTO BREASTDCEDL")
-    print("========================================")
+
+    print(
+        "========================================"
+    )
+
+    print(
+        "        ENTRENAMIENTO BREASTDCEDL"
+    )
+
+    print(
+        "========================================"
+    )
+
     print()
 
-    print("Dispositivo:", device)
+    print(
+        "Run:",
+        run_dir,
+    )
+
+    print(
+        "Dispositivo:",
+        device,
+    )
 
     if device.type == "cuda":
 
         print(
             "GPU:",
-            torch.cuda.get_device_name(0),
+            torch.cuda.get_device_name(
+                0
+            ),
         )
 
-    elif USE_GPU:
-
-        print(
-            "AVISO: USE_GPU=True, "
-            "pero CUDA no está disponible."
-        )
-
-    print("Batch size:", BATCH_SIZE)
-    print("Learning rate:", LEARNING_RATE)
-    print("Weight decay:", WEIGHT_DECAY)
-    print("Optimizador:", OPTIMIZER)
-    print("Máximo de épocas:", EPOCHS)
-    print("Patience:", PATIENCE)
-    print("Umbral:", CLASSIFICATION_THRESHOLD)
-    print("Objetivo ROC-AUC:", TARGET_ROC_AUC)
-    print("Seed:", SEED)
-    print()
-
-    # -----------------------------------------------------
-    # DATASETS
-    # -----------------------------------------------------
-
-    train_dataset = InternalSplitDataset(
-        csv_path=TRAIN_CSV,
-        root_dir=DATA_DIR,
+    print(
+        "Batch size:",
+        BATCH_SIZE,
     )
 
-    val_dataset = InternalSplitDataset(
+    print(
+        "Learning rate:",
+        LEARNING_RATE,
+    )
+
+    print(
+        "Weight decay:",
+        WEIGHT_DECAY,
+    )
+
+    print(
+        "Optimizador:",
+        OPTIMIZER,
+    )
+
+    print(
+        "Máximo de épocas:",
+        EPOCHS,
+    )
+
+    print(
+        "Patience:",
+        PATIENCE,
+    )
+
+    print(
+        "Threshold:",
+        CLASSIFICATION_THRESHOLD,
+    )
+
+    print(
+        "Objetivo ROC-AUC:",
+        TARGET_ROC_AUC,
+    )
+
+    print(
+        "Seed:",
+        SEED,
+    )
+
+    print()
+
+    # =====================================================
+    # DATASETS
+    # =====================================================
+
+    train_dataset = BreastDCEDataset(
+        csv_path=TRAIN_CSV,
+        root_dir=DATA_DIR,
+        split=None,
+    )
+
+    val_dataset = BreastDCEDataset(
         csv_path=VAL_CSV,
         root_dir=DATA_DIR,
+        split=None,
     )
 
     print(
@@ -561,9 +770,56 @@ def main():
 
     print()
 
-    # -----------------------------------------------------
+    # =====================================================
+    # COMPROBACIÓN DE DATA LEAKAGE
+    # =====================================================
+
+    train_patients = set(
+        train_dataset.df[
+            "patient_id"
+        ]
+        .astype(str)
+    )
+
+    val_patients = set(
+        val_dataset.df[
+            "patient_id"
+        ]
+        .astype(str)
+    )
+
+    common_patients = (
+        train_patients
+        & val_patients
+    )
+
+    if common_patients:
+
+        raise ValueError(
+            "DATA LEAKAGE DETECTADO: "
+            f"{len(common_patients)} pacientes "
+            "están en train y validation."
+        )
+
+    print(
+        "Comprobación paciente train/val: OK"
+    )
+
+    print(
+        "Pacientes train:",
+        len(train_patients),
+    )
+
+    print(
+        "Pacientes validation:",
+        len(val_patients),
+    )
+
+    print()
+
+    # =====================================================
     # DATALOADERS
-    # -----------------------------------------------------
+    # =====================================================
 
     pin_memory = (
         device.type == "cuda"
@@ -585,22 +841,27 @@ def main():
         pin_memory=pin_memory,
     )
 
-    # -----------------------------------------------------
+    # =====================================================
     # MODELO
-    # -----------------------------------------------------
+    # =====================================================
 
-    model = BreastCancerCNN()
-
-    model = model.to(device)
+    model = (
+        BreastCancerCNN()
+        .to(
+            device
+        )
+    )
 
     total_parameters = sum(
         parameter.numel()
-        for parameter in model.parameters()
+        for parameter
+        in model.parameters()
     )
 
     trainable_parameters = sum(
         parameter.numel()
-        for parameter in model.parameters()
+        for parameter
+        in model.parameters()
         if parameter.requires_grad
     )
 
@@ -616,14 +877,16 @@ def main():
 
     print()
 
-    # -----------------------------------------------------
+    # =====================================================
     # LOSS
-    # -----------------------------------------------------
+    # =====================================================
 
     if USE_WEIGHTED_LOSS:
 
-        pos_weight_value = calculate_pos_weight(
-            TRAIN_CSV
+        pos_weight_value = (
+            calculate_pos_weight(
+                TRAIN_CSV
+            )
         )
 
         pos_weight = torch.tensor(
@@ -632,8 +895,10 @@ def main():
             device=device,
         )
 
-        criterion = nn.BCEWithLogitsLoss(
-            pos_weight=pos_weight
+        criterion = (
+            nn.BCEWithLogitsLoss(
+                pos_weight=pos_weight
+            )
         )
 
         print(
@@ -642,7 +907,9 @@ def main():
 
     else:
 
-        criterion = nn.BCEWithLogitsLoss()
+        criterion = (
+            nn.BCEWithLogitsLoss()
+        )
 
         print(
             "Loss: BCEWithLogitsLoss normal"
@@ -650,19 +917,23 @@ def main():
 
     print()
 
-    # -----------------------------------------------------
-    # OPTIMIZADOR
-    # -----------------------------------------------------
+    optimizer = (
+        create_optimizer(
+            model
+        )
+    )
 
-    optimizer = create_optimizer(model)
+    # =====================================================
+    # CONTROL
+    # =====================================================
 
-    # -----------------------------------------------------
-    # CONTROL DEL MEJOR MODELO
-    # -----------------------------------------------------
+    best_val_auc = float(
+        "-inf"
+    )
 
-    best_val_auc = float("-inf")
-
-    best_val_loss = float("inf")
+    best_val_loss = float(
+        "inf"
+    )
 
     best_epoch = 0
 
@@ -670,18 +941,22 @@ def main():
 
     history = []
 
-    total_start_time = time.time()
+    total_start_time = (
+        time.time()
+    )
 
-    # -----------------------------------------------------
-    # LOOP PRINCIPAL
-    # -----------------------------------------------------
+    # =====================================================
+    # TRAIN LOOP
+    # =====================================================
 
     for epoch in range(
         1,
         EPOCHS + 1,
     ):
 
-        epoch_start = time.time()
+        epoch_start = (
+            time.time()
+        )
 
         (
             train_loss,
@@ -708,6 +983,7 @@ def main():
         )
 
         print()
+
         print(
             f"Epoch {epoch}/{EPOCHS}"
         )
@@ -757,110 +1033,116 @@ def main():
             f"{epoch_time:.2f} s"
         )
 
-        if (
-            not np.isnan(val_metrics["auc"])
-            and val_metrics["auc"] >= TARGET_ROC_AUC
-        ):
-
-            print(
-                f"*** Objetivo ROC-AUC "
-                f"{TARGET_ROC_AUC:.2f} "
-                f"SUPERADO ***"
-            )
-
-        # -------------------------------------------------
-        # HISTORIAL
-        # -------------------------------------------------
-
-        epoch_record = {
-
-            "epoch":
-                epoch,
-
-            "train_loss":
-                train_loss,
-
-            "train_accuracy":
-                train_acc,
-
-            "train_auc":
-                train_auc,
-
-            "val_loss":
-                val_metrics["loss"],
-
-            "val_accuracy":
-                val_metrics["accuracy"],
-
-            "val_auc":
-                val_metrics["auc"],
-
-            "val_sensitivity":
-                val_metrics["sensitivity"],
-
-            "val_specificity":
-                val_metrics["specificity"],
-
-            "epoch_time_seconds":
-                epoch_time,
-        }
+        # =================================================
+        # HISTORY
+        # =================================================
 
         history.append(
-            epoch_record
+            {
+
+                "epoch":
+                    epoch,
+
+                "train_loss":
+                    train_loss,
+
+                "train_accuracy":
+                    train_acc,
+
+                "train_auc":
+                    train_auc,
+
+                "val_loss":
+                    val_metrics["loss"],
+
+                "val_accuracy":
+                    val_metrics["accuracy"],
+
+                "val_auc":
+                    val_metrics["auc"],
+
+                "val_sensitivity":
+                    val_metrics["sensitivity"],
+
+                "val_specificity":
+                    val_metrics["specificity"],
+
+                "epoch_time_seconds":
+                    epoch_time,
+            }
         )
 
         pd.DataFrame(
             history
         ).to_csv(
-            HISTORY_PATH,
+            history_path,
             index=False,
         )
 
-        # -------------------------------------------------
-        # MEJOR MODELO SEGÚN ROC-AUC
-        # -------------------------------------------------
+        # =================================================
+        # CHECKPOINT
+        # =================================================
 
-        current_auc = val_metrics["auc"]
+        epoch_path = (
+            save_epoch_checkpoint(
+                model=model,
+                optimizer=optimizer,
+                epoch=epoch,
+                train_loss=train_loss,
+                train_acc=train_acc,
+                train_auc=train_auc,
+                val_metrics=val_metrics,
+                run_dir=run_dir,
+            )
+        )
+
+        print(
+            "Checkpoint guardado:",
+            epoch_path,
+        )
+
+        # =================================================
+        # BEST AUC
+        # =================================================
+
+        current_auc = (
+            val_metrics["auc"]
+        )
 
         auc_improved = (
-            not np.isnan(current_auc)
-            and current_auc > best_val_auc
+            not np.isnan(
+                current_auc
+            )
+            and
+            current_auc
+            > best_val_auc
         )
 
         if auc_improved:
 
-            best_val_auc = current_auc
+            best_val_auc = (
+                current_auc
+            )
 
             best_val_loss = (
                 val_metrics["loss"]
             )
 
-            best_epoch = epoch
+            best_epoch = (
+                epoch
+            )
 
             epochs_without_improvement = 0
 
-            if SAVE_BEST_MODEL:
+            print(
+                "Nueva mejor época:",
+                best_epoch,
+            )
 
-                save_checkpoint(
-                    model=model,
-                    optimizer=optimizer,
-                    epoch=epoch,
-                    train_loss=train_loss,
-                    train_acc=train_acc,
-                    train_auc=train_auc,
-                    val_metrics=val_metrics,
-                    path=MODEL_PATH,
-                )
-
-                print(
-                    "Nuevo mejor modelo guardado:",
-                    MODEL_PATH,
-                )
-
-                print(
-                    f"Mejor Val AUC: "
-                    f"{best_val_auc:.4f}"
-                )
+            print(
+                f"Mejor Val AUC: "
+                f"{best_val_auc:.4f}"
+            )
 
         else:
 
@@ -873,16 +1155,29 @@ def main():
                 PATIENCE,
             )
 
-        # -------------------------------------------------
-        # EARLY STOPPING
-        # -------------------------------------------------
+        if (
+            not np.isnan(
+                current_auc
+            )
+            and current_auc
+            >= TARGET_ROC_AUC
+        ):
+
+            print(
+                f"*** OBJETIVO ROC-AUC "
+                f"{TARGET_ROC_AUC:.2f} "
+                f"SUPERADO ***"
+            )
 
         if (
             USE_EARLY_STOPPING
-            and epochs_without_improvement >= PATIENCE
+            and
+            epochs_without_improvement
+            >= PATIENCE
         ):
 
             print()
+
             print(
                 "Early stopping activado."
             )
@@ -890,49 +1185,158 @@ def main():
             break
 
     # =====================================================
-    # CURVA ROC DEL MEJOR MODELO
+    # MEJOR ÉPOCA
     # =====================================================
 
-    if MODEL_PATH.exists():
+    if best_epoch == 0:
 
-        print()
-        print(
-            "Cargando mejor modelo para calcular ROC..."
+        raise RuntimeError(
+            "No se pudo determinar una mejor época."
         )
 
-        checkpoint = torch.load(
-            MODEL_PATH,
-            map_location=device,
+    best_epoch_path = (
+        run_dir
+        / f"epoch_{best_epoch:03d}.pt"
+    )
+
+    print()
+
+    print(
+        "Cargando mejor época:",
+        best_epoch_path,
+    )
+
+    checkpoint = torch.load(
+        best_epoch_path,
+        map_location=device,
+        weights_only=False,
+    )
+
+    model.load_state_dict(
+        checkpoint[
+            "model_state_dict"
+        ]
+    )
+
+    best_val_metrics = validate(
+        model=model,
+        loader=val_loader,
+        criterion=criterion,
+        device=device,
+    )
+
+    # =====================================================
+    # ROC
+    # =====================================================
+
+    roc_path = (
+        run_dir
+        / "roc_curve.png"
+    )
+
+    plot_roc_curve(
+        labels=
+            best_val_metrics[
+                "labels"
+            ],
+
+        probabilities=
+            best_val_metrics[
+                "probabilities"
+            ],
+
+        output_path=
+            roc_path,
+
+        title=
+            "ROC Curve - Best Validation Epoch",
+    )
+
+    # =====================================================
+    # CURVAS
+    # =====================================================
+
+    plot_training_history(
+        history_path=
+            history_path,
+
+        output_dir=
+            run_dir,
+    )
+
+    # =====================================================
+    # SUMMARY
+    # =====================================================
+
+    summary_path = (
+        run_dir
+        / "summary.txt"
+    )
+
+    with open(
+        summary_path,
+        "w",
+        encoding="utf-8",
+    ) as file:
+
+        file.write(
+            f"Best epoch: "
+            f"{best_epoch}\n"
         )
 
-        model.load_state_dict(
-            checkpoint["model_state_dict"]
+        file.write(
+            f"Best validation AUC: "
+            f"{best_val_auc:.6f}\n"
         )
 
-        best_val_metrics = validate(
-            model=model,
-            loader=val_loader,
-            criterion=criterion,
-            device=device,
+        file.write(
+            f"Validation loss: "
+            f"{best_val_metrics['loss']:.6f}\n"
         )
 
-        roc_path = (
-            MODEL_PATH.parent
-            / "roc_curve.png"
+        file.write(
+            f"Validation accuracy: "
+            f"{best_val_metrics['accuracy']:.6f}\n"
         )
 
-        plot_roc_curve(
-            labels=best_val_metrics["labels"],
-            probabilities=best_val_metrics["probabilities"],
-            output_path=roc_path,
-            title="ROC Curve - Best Validation Model",
+        file.write(
+            f"Validation sensitivity: "
+            f"{best_val_metrics['sensitivity']:.6f}\n"
         )
 
-    else:
+        file.write(
+            f"Validation specificity: "
+            f"{best_val_metrics['specificity']:.6f}\n"
+        )
 
-        print(
-            "No se encontró un modelo guardado "
-            "para generar la curva ROC."
+        file.write(
+            f"Target AUC: "
+            f"{TARGET_ROC_AUC:.6f}\n"
+        )
+
+        file.write(
+            f"Optimizer: "
+            f"{OPTIMIZER}\n"
+        )
+
+        file.write(
+            f"Learning rate: "
+            f"{LEARNING_RATE}\n"
+        )
+
+        file.write(
+            f"Weight decay: "
+            f"{WEIGHT_DECAY}\n"
+        )
+
+        file.write(
+            f"Batch size: "
+            f"{BATCH_SIZE}\n"
+        )
+
+        file.write(
+            f"Patience: "
+            f"{PATIENCE}\n"
         )
 
     # =====================================================
@@ -945,10 +1349,25 @@ def main():
     )
 
     print()
-    print("========================================")
-    print("        ENTRENAMIENTO FINALIZADO")
-    print("========================================")
+
+    print(
+        "========================================"
+    )
+
+    print(
+        "        ENTRENAMIENTO FINALIZADO"
+    )
+
+    print(
+        "========================================"
+    )
+
     print()
+
+    print(
+        "Run guardado en:",
+        run_dir,
+    )
 
     print(
         "Mejor época:",
@@ -956,13 +1375,18 @@ def main():
     )
 
     print(
-        "Mejor Val AUC:",
-        f"{best_val_auc:.4f}",
+        "Mejor checkpoint:",
+        best_epoch_path,
     )
 
     print(
-        "Val Loss de la mejor época:",
-        f"{best_val_loss:.4f}",
+        f"Mejor Val AUC: "
+        f"{best_val_auc:.4f}"
+    )
+
+    print(
+        f"Val Loss mejor época: "
+        f"{best_val_loss:.4f}"
     )
 
     print(
@@ -970,32 +1394,62 @@ def main():
         TARGET_ROC_AUC,
     )
 
-    if best_val_auc >= TARGET_ROC_AUC:
+    if (
+        best_val_auc
+        >= TARGET_ROC_AUC
+    ):
 
         print(
-            "Resultado: OBJETIVO SUPERADO"
+            "Resultado: "
+            "OBJETIVO SUPERADO"
         )
 
     else:
 
         print(
-            "Resultado: objetivo todavía no alcanzado"
+            "Resultado: "
+            "objetivo todavía no alcanzado"
         )
 
+    print()
+
     print(
-        "Mejor modelo:",
-        MODEL_PATH,
+        "Archivos generados:"
     )
 
     print(
-        "Historial:",
-        HISTORY_PATH,
+        "- config.py"
     )
 
     print(
-        "Curva ROC:",
-        MODEL_PATH.parent / "roc_curve.png",
+        "- epoch_XXX.pt"
     )
+
+    print(
+        "- history.csv"
+    )
+
+    print(
+        "- roc_curve.png"
+    )
+
+    print(
+        "- loss_curve.png"
+    )
+
+    print(
+        "- accuracy_curve.png"
+    )
+
+    print(
+        "- auc_curve.png"
+    )
+
+    print(
+        "- summary.txt"
+    )
+
+    print()
 
     print(
         f"Tiempo total: "
@@ -1004,4 +1458,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
