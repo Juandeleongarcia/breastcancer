@@ -10,6 +10,9 @@ from torch.utils.data import Dataset
 from config.config import (
     IMAGE_SIZE,
     INPUT_MODE,
+    USE_CLIPPING,
+    CHANNEL_P01,
+    CHANNEL_P99,
     USE_STANDARDIZATION,
     CHANNEL_MEANS,
     CHANNEL_STDS,
@@ -17,41 +20,40 @@ from config.config import (
 
 
 class BreastDCEDataset(Dataset):
+    """
+    Dataset definitivo para BreastDCEDL.
+
+    Pipeline:
+
+    1. Carga PRE / EARLY / LATE.
+    2. Convierte intensidades de [0, 255] a [0, 1].
+    3. Construye los canales según INPUT_MODE.
+    4. Aplica clipping opcional por canal.
+    5. Aplica estandarización opcional por canal.
+
+    Todo se controla desde config/config.py.
+    """
+
     def __init__(
         self,
         csv_path="metadata/samples.csv",
         root_dir="breastdcedl",
         split=None,
     ):
-        """
-        Dataset para BreastDCEDL.
-
-        Modos de entrada controlados desde config.py:
-
-        INPUT_MODE = "raw"
-            canal 0 -> PRE
-            canal 1 -> EARLY
-            canal 2 -> LATE
-
-        INPUT_MODE = "enhancement"
-            canal 0 -> PRE
-            canal 1 -> EARLY - PRE
-            canal 2 -> LATE - PRE
-
-        Si split=None se utilizan todas las filas del CSV.
-        Esto es lo que usamos con internal_train.csv
-        e internal_val.csv, porque ya están separados.
-        """
 
         self.root_dir = Path(root_dir)
 
-        self.df = pd.read_csv(
-            csv_path
-        )
+        self.df = pd.read_csv(csv_path)
 
         # =================================================
         # SPLIT
         # =================================================
+
+        # Si utilizamos internal_train.csv o internal_val.csv,
+        # pasaremos split=None porque ya están separados.
+        #
+        # Si usamos samples.csv y contiene columna "split",
+        # sí podemos filtrar por train/val/test.
 
         if (
             split is not None
@@ -75,8 +77,33 @@ class BreastDCEDataset(Dataset):
         if len(self.df) == 0:
 
             raise ValueError(
-                f"No se encontraron muestras "
-                f"en {csv_path}"
+                f"No se encontraron muestras en {csv_path}"
+            )
+
+        # =================================================
+        # COMPROBACIONES DE COLUMNAS
+        # =================================================
+
+        required_columns = [
+            "path_pre",
+            "path_early",
+            "path_late",
+            "pCR",
+            "patient_id",
+            "sample_id",
+        ]
+
+        missing_columns = [
+            column
+            for column in required_columns
+            if column not in self.df.columns
+        ]
+
+        if missing_columns:
+
+            raise ValueError(
+                "Faltan columnas obligatorias en el CSV: "
+                f"{missing_columns}"
             )
 
         # =================================================
@@ -92,8 +119,39 @@ class BreastDCEDataset(Dataset):
 
             raise ValueError(
                 f"INPUT_MODE='{INPUT_MODE}' no válido. "
-                f"Opciones: {valid_input_modes}"
+                f"Opciones disponibles: {valid_input_modes}"
             )
+
+        # =================================================
+        # COMPROBACIÓN CLIPPING
+        # =================================================
+
+        if USE_CLIPPING:
+
+            if len(CHANNEL_P01) != 3:
+
+                raise ValueError(
+                    "CHANNEL_P01 debe contener 3 valores."
+                )
+
+            if len(CHANNEL_P99) != 3:
+
+                raise ValueError(
+                    "CHANNEL_P99 debe contener 3 valores."
+                )
+
+            for channel_index in range(3):
+
+                if (
+                    CHANNEL_P01[channel_index]
+                    >= CHANNEL_P99[channel_index]
+                ):
+
+                    raise ValueError(
+                        f"Canal {channel_index}: "
+                        "CHANNEL_P01 debe ser menor "
+                        "que CHANNEL_P99."
+                    )
 
         # =================================================
         # COMPROBACIÓN ESTANDARIZACIÓN
@@ -104,13 +162,13 @@ class BreastDCEDataset(Dataset):
             if len(CHANNEL_MEANS) != 3:
 
                 raise ValueError(
-                    "CHANNEL_MEANS debe tener 3 valores."
+                    "CHANNEL_MEANS debe contener 3 valores."
                 )
 
             if len(CHANNEL_STDS) != 3:
 
                 raise ValueError(
-                    "CHANNEL_STDS debe tener 3 valores."
+                    "CHANNEL_STDS debe contener 3 valores."
                 )
 
             if any(
@@ -119,8 +177,7 @@ class BreastDCEDataset(Dataset):
             ):
 
                 raise ValueError(
-                    "Todos los CHANNEL_STDS "
-                    "deben ser mayores que 0."
+                    "Todos los CHANNEL_STDS deben ser > 0."
                 )
 
     def __len__(self):
@@ -128,13 +185,22 @@ class BreastDCEDataset(Dataset):
         return len(self.df)
 
     # =====================================================
-    # CARGA DE IMAGEN
+    # CARGA DE IMÁGENES
     # =====================================================
 
     def _load_grayscale_image(
         self,
         relative_path,
     ):
+        """
+        Carga una imagen PNG en escala de grises.
+
+        Entrada:
+            uint8 [0, 255]
+
+        Salida:
+            float32 [0, 1]
+        """
 
         image_path = (
             self.root_dir
@@ -144,8 +210,7 @@ class BreastDCEDataset(Dataset):
         if not image_path.exists():
 
             raise FileNotFoundError(
-                f"No se encontró la imagen:\n"
-                f"{image_path}"
+                f"No se encontró la imagen:\n{image_path}"
             )
 
         image = (
@@ -171,15 +236,16 @@ class BreastDCEDataset(Dataset):
             dtype=np.float32,
         )
 
-        image_tensor = (
-            torch.from_numpy(
-                image_array
-            )
+        image_tensor = torch.from_numpy(
+            image_array
         )
 
+        # Normalización básica:
         # [0, 255] -> [0, 1]
+
         image_tensor = (
-            image_tensor / 255.0
+            image_tensor
+            / 255.0
         )
 
         return image_tensor
@@ -194,6 +260,21 @@ class BreastDCEDataset(Dataset):
         early,
         late,
     ):
+        """
+        Construye los tres canales que recibe la CNN.
+
+        INPUT_MODE = "raw"
+
+            canal 0 -> PRE
+            canal 1 -> EARLY
+            canal 2 -> LATE
+
+        INPUT_MODE = "enhancement"
+
+            canal 0 -> PRE
+            canal 1 -> EARLY - PRE
+            canal 2 -> LATE - PRE
+        """
 
         if INPUT_MODE == "raw":
 
@@ -222,14 +303,44 @@ class BreastDCEDataset(Dataset):
         else:
 
             raise ValueError(
-                f"INPUT_MODE no reconocido: "
-                f"{INPUT_MODE}"
+                f"INPUT_MODE no reconocido: {INPUT_MODE}"
             )
 
         image = torch.stack(
             channels,
             dim=0,
         )
+
+        return image
+
+    # =====================================================
+    # CLIPPING
+    # =====================================================
+
+    def _clip_channels(
+        self,
+        image,
+    ):
+        """
+        Recorta los valores extremos de cada canal.
+
+        Los límites P01 y P99 deben haberse calculado
+        utilizando únicamente TRAIN.
+        """
+
+        if not USE_CLIPPING:
+
+            return image
+
+        image = image.clone()
+
+        for channel_index in range(3):
+
+            image[channel_index] = torch.clamp(
+                image[channel_index],
+                min=CHANNEL_P01[channel_index],
+                max=CHANNEL_P99[channel_index],
+            )
 
         return image
 
@@ -241,6 +352,14 @@ class BreastDCEDataset(Dataset):
         self,
         image,
     ):
+        """
+        Estandarización independiente por canal:
+
+            (x - mean) / std
+
+        mean y std deben calcularse exclusivamente
+        con el conjunto de entrenamiento.
+        """
 
         if not USE_STANDARDIZATION:
 
@@ -250,31 +369,23 @@ class BreastDCEDataset(Dataset):
 
         for channel_index in range(3):
 
-            mean = (
-                CHANNEL_MEANS[
-                    channel_index
-                ]
-            )
-
-            std = (
-                CHANNEL_STDS[
-                    channel_index
-                ]
-            )
-
-            image[
+            mean = CHANNEL_MEANS[
                 channel_index
-            ] = (
-                image[
-                    channel_index
-                ]
+            ]
+
+            std = CHANNEL_STDS[
+                channel_index
+            ]
+
+            image[channel_index] = (
+                image[channel_index]
                 - mean
             ) / std
 
         return image
 
     # =====================================================
-    # GETITEM
+    # GET ITEM
     # =====================================================
 
     def __getitem__(
@@ -282,9 +393,11 @@ class BreastDCEDataset(Dataset):
         idx,
     ):
 
-        row = (
-            self.df.iloc[idx]
-        )
+        row = self.df.iloc[idx]
+
+        # -------------------------------------------------
+        # CARGA DE PRE / EARLY / LATE
+        # -------------------------------------------------
 
         pre = (
             self._load_grayscale_image(
@@ -304,6 +417,10 @@ class BreastDCEDataset(Dataset):
             )
         )
 
+        # -------------------------------------------------
+        # CONSTRUCCIÓN DE LOS CANALES
+        # -------------------------------------------------
+
         image = (
             self._build_channels(
                 pre=pre,
@@ -312,11 +429,29 @@ class BreastDCEDataset(Dataset):
             )
         )
 
+        # -------------------------------------------------
+        # CLIPPING
+        # -------------------------------------------------
+
+        image = (
+            self._clip_channels(
+                image
+            )
+        )
+
+        # -------------------------------------------------
+        # ESTANDARIZACIÓN
+        # -------------------------------------------------
+
         image = (
             self._standardize(
                 image
             )
         )
+
+        # -------------------------------------------------
+        # LABEL
+        # -------------------------------------------------
 
         label = torch.tensor(
             float(
@@ -325,8 +460,11 @@ class BreastDCEDataset(Dataset):
             dtype=torch.float32,
         )
 
-        sample = {
+        # -------------------------------------------------
+        # SAMPLE
+        # -------------------------------------------------
 
+        sample = {
             "image":
                 image,
 
@@ -352,15 +490,15 @@ class BreastDCEDataset(Dataset):
 
 
 # =========================================================
-# TEST
+# TEST DEL DATASET
 # =========================================================
 
 if __name__ == "__main__":
 
     dataset = BreastDCEDataset(
-        csv_path="metadata/samples.csv",
+        csv_path="metadata/internal_train.csv",
         root_dir="breastdcedl",
-        split="train",
+        split=None,
     )
 
     print()
@@ -382,6 +520,11 @@ if __name__ == "__main__":
     print(
         "INPUT_MODE:",
         INPUT_MODE,
+    )
+
+    print(
+        "USE_CLIPPING:",
+        USE_CLIPPING,
     )
 
     print(
@@ -427,6 +570,10 @@ if __name__ == "__main__":
 
     print()
 
+    # =====================================================
+    # ESTADÍSTICAS DE LA PRIMERA MUESTRA
+    # =====================================================
+
     for channel_index in range(3):
 
         channel = (
@@ -447,7 +594,7 @@ if __name__ == "__main__":
         print(
             "  Max:",
             channel.max().item(),
-        ) 
+        )
 
         print(
             "  Mean:",

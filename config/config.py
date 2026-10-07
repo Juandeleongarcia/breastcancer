@@ -30,40 +30,74 @@ NUM_WORKERS = 4
 #     canal 1 -> EARLY - PRE
 #     canal 2 -> LATE - PRE
 #
-# Para continuar desde el Run 003:
+# Run 005:
 INPUT_MODE = "enhancement"
 
 
-# ---------------------------------------------------------
-# ESTANDARIZACIÓN
-# ---------------------------------------------------------
+# =========================================================
+# CLIPPING DE INTENSIDADES
+# =========================================================
 
-# Si es True:
+# Recorte de valores extremos usando los percentiles
+# calculados exclusivamente sobre TRAIN.
 #
-#     canal = (canal - mean) / std
+# Pipeline:
 #
-# IMPORTANTE:
-# Las estadísticas deben calcularse únicamente
-# utilizando el conjunto de entrenamiento.
-#
-# Por ahora lo dejamos desactivado hasta calcularlas.
-USE_STANDARDIZATION = False
+# PRE / EARLY / LATE
+#       ↓
+# [0, 1]
+#       ↓
+# construcción de canales
+#       ↓
+# clipping P01-P99
+#       ↓
+# standardization
+#       ↓
+# CNN
+
+USE_CLIPPING = True
 
 
-# Valores utilizados únicamente si
-# USE_STANDARDIZATION = True.
-#
-# De momento son neutros:
-CHANNEL_MEANS = [
-    0.0,
-    0.0,
-    0.0,
+# Percentil 1 calculado sobre TRAIN
+CHANNEL_P01 = [
+    0.0000000000,      # PRE
+    -0.1098039150,     # EARLY - PRE
+    -0.1058823615,     # LATE - PRE
 ]
 
+
+# Percentil 99 calculado sobre TRAIN
+CHANNEL_P99 = [
+    0.6705882549,      # PRE
+    0.6509803534,      # EARLY - PRE
+    0.6235294342,      # LATE - PRE
+]
+
+
+# =========================================================
+# ESTANDARIZACIÓN
+# =========================================================
+
+# Estandarización independiente por canal:
+#
+#     x_standardized = (x - mean) / std
+#
+# Las estadísticas se han calculado sobre TRAIN
+# DESPUÉS de aplicar el clipping.
+USE_STANDARDIZATION = True
+
+
+CHANNEL_MEANS = [
+    0.1263833838,
+    0.0676578613,
+    0.0782202765,
+]
+
+
 CHANNEL_STDS = [
-    1.0,
-    1.0,
-    1.0,
+    0.1545330693,
+    0.1365353164,
+    0.1387470868,
 ]
 
 
@@ -71,20 +105,8 @@ CHANNEL_STDS = [
 # ARQUITECTURA CNN
 # =========================================================
 
-# Run 001:
-# [32, 64, 128]
-# Best Val AUC ~ 0.5656
-#
-# Run 002:
-# [32, 64, 128, 256]
-# Best Val AUC ~ 0.5452
-#
-# Run 003:
-# [32, 64, 128]
-# + enhancement
-# Best Val AUC ~ 0.5596
-#
-# La arquitectura compacta ha generalizado mejor.
+# Arquitectura compacta mantenida respecto al Run 004
+# para aislar el efecto del preprocessing.
 CONV_CHANNELS = [
     32,
     64,
@@ -92,10 +114,8 @@ CONV_CHANNELS = [
 ]
 
 KERNEL_SIZE = 3
-
 PADDING = 1
 
-# MaxPool2d(2)
 POOL_SIZE = 2
 
 USE_BATCH_NORM = True
@@ -103,7 +123,8 @@ USE_BATCH_NORM = True
 DROPOUT = 0.40
 
 # Clasificación binaria:
-# pCR / no pCR
+# 1 -> pCR
+# 0 -> no pCR
 NUM_CLASSES = 1
 
 
@@ -111,13 +132,12 @@ NUM_CLASSES = 1
 # ENTRENAMIENTO
 # =========================================================
 
-# Aumentamos el máximo porque ahora permitiremos
-# más épocas sin mejora.
 EPOCHS = 25
 
 LEARNING_RATE = 0.0005
 
 WEIGHT_DECAY = 0.0005
+
 
 # Opciones implementadas:
 # "adam"
@@ -125,8 +145,10 @@ WEIGHT_DECAY = 0.0005
 # "sgd"
 OPTIMIZER = "adamw"
 
-# Compensación del desbalance entre
-# pCR y no pCR.
+
+# Mantenemos la misma weighted loss que en Run 004
+# para que el cambio principal de Run 005
+# sea exclusivamente el preprocessing.
 USE_WEIGHTED_LOSS = True
 
 
@@ -134,12 +156,12 @@ USE_WEIGHTED_LOSS = True
 # CLASIFICACIÓN
 # =========================================================
 
-# Afecta a:
-# - accuracy
-# - sensitivity
-# - specificity
+# Threshold utilizado para:
+# - Accuracy
+# - Sensitivity
+# - Specificity
 #
-# NO afecta al ROC-AUC.
+# No afecta al ROC-AUC.
 CLASSIFICATION_THRESHOLD = 0.50
 
 
@@ -149,10 +171,8 @@ CLASSIFICATION_THRESHOLD = 0.50
 
 USE_EARLY_STOPPING = True
 
-# Antes utilizábamos 5.
-#
-# Ahora permitimos 10 épocas consecutivas
-# sin mejora del validation ROC-AUC.
+# Detiene el entrenamiento si el validation ROC-AUC
+# no mejora durante 10 épocas consecutivas.
 PATIENCE = 10
 
 
