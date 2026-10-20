@@ -1,7 +1,7 @@
 import torch
 
-from dataset import BreastDCEDataset
-from model import BreastCancerCNN
+from src.dataset import BreastDCEDataset
+from src.model import BreastCancerCNN
 
 
 def main():

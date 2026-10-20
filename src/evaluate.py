@@ -1,220 +1,78 @@
-from pathlib import Path
+"""Evaluación independiente usando la configuración guardada con los pesos."""
+import argparse
+import json
 
+import pandas as pd
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from config.config import (
-    VAL_CSV,
-    DATA_DIR,
-    BATCH_SIZE,
-    NUM_WORKERS,
-    CLASSIFICATION_THRESHOLD,
-    MODEL_PATH,
-    USE_WEIGHTED_LOSS,
-    USE_GPU,
-)
-
+from src.configuration import resolve_config, load_config, project_path, file_hash
+from src.dataset import BreastDCEDataset
 from src.model import BreastCancerCNN
-from src.train import (
-    InternalSplitDataset,
-    calculate_pos_weight,
-    validate,
-)
+from src.experiment import select_device, create_criterion, validate, select_patients
+from src.metrics import save_evaluation_artifacts
 
-from src.metrics import plot_roc_curve
+
+def evaluate_checkpoint(path, output_dir=None, legacy_config=None, csv_path=None):
+    path = project_path(path)
+    checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+    raw_config = checkpoint.get("config")
+    if raw_config is None:
+        candidates = [path.parent / "config.json", path.parent / "details" / "config.json",
+                      path.parent.parent / "details" / "config.json"]
+        snapshot = next((p for p in candidates if p.exists()), candidates[0])
+        if legacy_config:
+            raw_config = load_config(legacy_config)
+        elif snapshot.exists():
+            raw_config = load_config(snapshot)
+        else:
+            raise ValueError("Checkpoint histórico sin contrato: aportar --legacy-config explícito")
+        required = ["INPUT_CHANNELS", "CONV_CHANNELS", "KERNEL_SIZE", "PADDING", "POOL_SIZE",
+                    "USE_BATCH_NORM", "DROPOUT", "IMAGE_SIZE", "INPUT_MODE", "USE_CLIPPING",
+                    "CHANNEL_P01", "CHANNEL_P99", "USE_STANDARDIZATION", "CHANNEL_MEANS", "CHANNEL_STDS"]
+        if any(key not in raw_config for key in required):
+            raise ValueError("Contrato histórico incompleto: no se adivina el preprocesamiento")
+    # Los checkpoints anteriores a la variante espacial usaban una convolución por bloque.
+    # No dejar que una futura edición de defaults cambie su arquitectura al evaluarlos.
+    raw_config = dict(raw_config)
+    raw_config.setdefault("CONVS_PER_BLOCK", 1)
+    cfg = resolve_config(raw_config)
+    cfg["DEADLINE_UNIX"] = None  # El presupuesto original no limita una reevaluación posterior.
+    selected_csv = csv_path or cfg["VAL_CSV"]
+    expected_hash = checkpoint.get("csv_sha256", {}).get("validation")
+    if csv_path is None and expected_hash and file_hash(selected_csv) != expected_hash:
+        raise ValueError("La partición de validación cambió desde el entrenamiento")
+    frame = pd.read_csv(project_path(selected_csv))
+    if "split" not in frame or not frame.split.eq("train").all():
+        raise ValueError("Este evaluador de desarrollo solo utiliza validación interna del train público")
+    dataset = BreastDCEDataset(selected_csv, cfg["DATA_DIR"], config=cfg)
+    if cfg["SMOKE_TEST"] and csv_path is None:
+        dataset.df = select_patients(dataset.df, cfg["SMOKE_PATIENTS_PER_CLASS"], cfg["SEED"])
+    device = select_device(cfg)
+    model = BreastCancerCNN(cfg).to(device)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    criterion = create_criterion(cfg, device, checkpoint.get("pos_weight"))
+    loader = DataLoader(dataset, batch_size=cfg["BATCH_SIZE"], shuffle=False,
+                        num_workers=cfg["NUM_WORKERS"], pin_memory=device.type == "cuda")
+    result = validate(model, loader, criterion, device, cfg)
+    result["diagnostic_partial"] = bool(result["diagnostic_partial"] or cfg["SMOKE_TEST"])
+    if output_dir is not None:
+        output_dir = project_path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=False)
+        save_evaluation_artifacts(result, output_dir)
+        summary = {k: result[k] for k in ["loss", "slice", "patient", "diagnostic_partial"]}
+        (output_dir / "evaluation.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    return result
 
 
 def main():
-
-    # =====================================================
-    # DISPOSITIVO
-    # =====================================================
-
-    if USE_GPU and torch.cuda.is_available():
-        device = torch.device("cuda")
-    else:
-        device = torch.device("cpu")
-
-    print()
-    print("========================================")
-    print("        EVALUACIÓN BREASTDCEDL")
-    print("========================================")
-    print()
-
-    print("Dispositivo:", device)
-
-    if device.type == "cuda":
-        print(
-            "GPU:",
-            torch.cuda.get_device_name(0),
-        )
-
-    print()
-
-    # =====================================================
-    # DATASET DE VALIDACIÓN
-    # =====================================================
-
-    val_dataset = InternalSplitDataset(
-        csv_path=VAL_CSV,
-        root_dir=DATA_DIR,
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        num_workers=NUM_WORKERS,
-        pin_memory=(device.type == "cuda"),
-    )
-
-    print(
-        "Muestras validation:",
-        len(val_dataset),
-    )
-
-    print()
-
-    # =====================================================
-    # MODELO
-    # =====================================================
-
-    model = BreastCancerCNN()
-
-    model = model.to(device)
-
-    # =====================================================
-    # CARGAR CHECKPOINT
-    # =====================================================
-
-    model_path = Path(MODEL_PATH)
-
-    if not model_path.exists():
-
-        raise FileNotFoundError(
-            f"No se encontró el modelo: {model_path}"
-        )
-
-    print(
-        "Cargando modelo:",
-        model_path,
-    )
-
-    checkpoint = torch.load(
-        model_path,
-        map_location=device,
-        weights_only=False,
-    )
-
-    model.load_state_dict(
-        checkpoint["model_state_dict"]
-    )
-
-    print(
-        "Época guardada:",
-        checkpoint.get("epoch", "desconocida"),
-    )
-
-    print(
-        "Val AUC guardado:",
-        checkpoint.get("val_auc", "desconocido"),
-    )
-
-    print()
-
-    # =====================================================
-    # LOSS
-    # =====================================================
-
-    if USE_WEIGHTED_LOSS:
-
-        pos_weight_value = calculate_pos_weight(
-            "metadata/internal_train.csv"
-        )
-
-        pos_weight = torch.tensor(
-            [pos_weight_value],
-            dtype=torch.float32,
-            device=device,
-        )
-
-        criterion = nn.BCEWithLogitsLoss(
-            pos_weight=pos_weight
-        )
-
-    else:
-
-        criterion = nn.BCEWithLogitsLoss()
-
-    # =====================================================
-    # VALIDACIÓN
-    # =====================================================
-
-    val_metrics = validate(
-        model=model,
-        loader=val_loader,
-        criterion=criterion,
-        device=device,
-    )
-
-    print()
-    print("========================================")
-    print("          RESULTADOS VALIDACIÓN")
-    print("========================================")
-    print()
-
-    print(
-        f"Loss: "
-        f"{val_metrics['loss']:.4f}"
-    )
-
-    print(
-        f"Accuracy: "
-        f"{val_metrics['accuracy']:.4f}"
-    )
-
-    print(
-        f"ROC-AUC: "
-        f"{val_metrics['auc']:.4f}"
-    )
-
-    print(
-        f"Sensitivity: "
-        f"{val_metrics['sensitivity']:.4f}"
-    )
-
-    print(
-        f"Specificity: "
-        f"{val_metrics['specificity']:.4f}"
-    )
-
-    print(
-        f"Threshold: "
-        f"{CLASSIFICATION_THRESHOLD:.2f}"
-    )
-
-    # =====================================================
-    # CURVA ROC
-    # =====================================================
-
-    roc_path = (
-        model_path.parent
-        / "roc_curve.png"
-    )
-
-    plot_roc_curve(
-        labels=val_metrics["labels"],
-        probabilities=val_metrics["probabilities"],
-        output_path=roc_path,
-        title="ROC Curve - Validation",
-    )
-
-    print()
-    print(
-        "Curva ROC guardada en:",
-        roc_path,
-    )
+    parser = argparse.ArgumentParser(description="Evaluación reproducible por corte y paciente")
+    parser.add_argument("checkpoint")
+    parser.add_argument("--output", help="Carpeta nueva, nunca sobrescrita")
+    parser.add_argument("--legacy-config")
+    args = parser.parse_args()
+    result = evaluate_checkpoint(args.checkpoint, args.output, args.legacy_config)
+    print(json.dumps({k: result[k] for k in ["loss", "slice", "patient", "diagnostic_partial"]}, indent=2))
 
 
 if __name__ == "__main__":

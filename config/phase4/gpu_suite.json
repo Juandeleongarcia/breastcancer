@@ -1,0 +1,24 @@
+{
+  "experiments": [
+    {
+      "id": "BASELINE",
+      "config": "config/phase4/gpu/BASELINE.json"
+    },
+    {
+      "id": "NO_WEIGHT_PC",
+      "config": "config/phase4/gpu/NO_WEIGHT_PC.json"
+    },
+    {
+      "id": "NO_CLIP_PC",
+      "config": "config/phase4/gpu/NO_CLIP_PC.json"
+    },
+    {
+      "id": "LOW_LR_PC",
+      "config": "config/phase4/gpu/LOW_LR_PC.json"
+    },
+    {
+      "id": "SPATIAL_PC",
+      "config": "config/phase4/gpu/SPATIAL_PC.json"
+    }
+  ]
+}

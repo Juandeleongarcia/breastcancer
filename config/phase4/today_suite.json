@@ -1,0 +1,20 @@
+{
+  "experiments": [
+    {
+      "id": "NO_WEIGHT_PC",
+      "config": "config/phase4/today/01_NO_WEIGHT_PC.json"
+    },
+    {
+      "id": "NO_CLIP_PC",
+      "config": "config/phase4/today/02_NO_CLIP_PC.json"
+    },
+    {
+      "id": "LOW_LR_PC",
+      "config": "config/phase4/today/03_LOW_LR_PC.json"
+    },
+    {
+      "id": "SPATIAL_PC",
+      "config": "config/phase4/today/04_SPATIAL_PC.json"
+    }
+  ]
+}

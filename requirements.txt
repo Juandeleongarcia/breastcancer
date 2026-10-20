@@ -1,0 +1,9 @@
+# Dependencias directas. El backend CPU/CUDA de torch se elige por equipo.
+numpy>=2.5,<3
+pandas>=3.0,<4
+Pillow>=12.3,<13
+scikit-learn>=1.9,<2
+matplotlib>=3.11,<4
+requests>=2.34,<3
+torch>=2.14,<3
+tzdata>=2026.4

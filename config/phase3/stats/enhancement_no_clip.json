@@ -1,0 +1,51 @@
+{
+  "means": [
+    0.12757676524157663,
+    0.067756055576573,
+    0.07841824456467295
+  ],
+  "stds": [
+    0.15944219813664282,
+    0.14162318443694835,
+    0.1450198725022357
+  ],
+  "minima": [
+    0.0,
+    -1.0,
+    -1.0
+  ],
+  "maxima": [
+    1.0,
+    1.0,
+    1.0
+  ],
+  "fraction_at_clip_low": [
+    0.16474707959514812,
+    0.0006760489811142082,
+    0.0006218606502823041
+  ],
+  "fraction_at_clip_high": [
+    0.0003083549137453545,
+    0.0003710965417738708,
+    0.0003870532743040666
+  ],
+  "clipping_note": "Fracciones en los l\u00edmites, no estimaci\u00f3n exacta de informaci\u00f3n perdida",
+  "preprocessing": {
+    "INPUT_MODE": "enhancement",
+    "USE_CLIPPING": false,
+    "CHANNEL_P01": [
+      0.0,
+      -0.109803915,
+      -0.1058823615
+    ],
+    "CHANNEL_P99": [
+      0.6705882549,
+      0.6509803534,
+      0.6235294342
+    ]
+  },
+  "n_samples": 8745,
+  "diagnostic_partial": false,
+  "train_csv_sha256": "fa10021f0800dd08b7696593d47586d69772bc1bef0e088aebc92f3f7b8f394b",
+  "seconds": 69.15464199986309
+}

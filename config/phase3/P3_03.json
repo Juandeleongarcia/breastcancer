@@ -1,0 +1,85 @@
+{
+  "TRAIN_CSV": "metadata/internal_train.csv",
+  "VAL_CSV": "metadata/internal_val.csv",
+  "DATA_DIR": "breastdcedl",
+  "IMAGE_SIZE": 256,
+  "INPUT_CHANNELS": 3,
+  "BATCH_SIZE": 16,
+  "NUM_WORKERS": 0,
+  "INPUT_MODE": "enhancement",
+  "USE_CLIPPING": true,
+  "CHANNEL_P01": [
+    0.0,
+    -0.109803915,
+    -0.1058823615
+  ],
+  "CHANNEL_P99": [
+    0.6705882549,
+    0.6509803534,
+    0.6235294342
+  ],
+  "USE_STANDARDIZATION": true,
+  "CHANNEL_MEANS": [
+    0.1263833838,
+    0.0676578613,
+    0.0782202765
+  ],
+  "CHANNEL_STDS": [
+    0.1545330693,
+    0.1365353164,
+    0.1387470868
+  ],
+  "CONV_CHANNELS": [
+    32,
+    64,
+    128
+  ],
+  "KERNEL_SIZE": 3,
+  "PADDING": 1,
+  "POOL_SIZE": 2,
+  "USE_BATCH_NORM": true,
+  "DROPOUT": 0.4,
+  "NUM_CLASSES": 1,
+  "EPOCHS": 3,
+  "LEARNING_RATE": 0.0001,
+  "WEIGHT_DECAY": 0.0005,
+  "OPTIMIZER": "adamw",
+  "USE_WEIGHTED_LOSS": true,
+  "CLASSIFICATION_THRESHOLD": 0.5,
+  "USE_EARLY_STOPPING": true,
+  "PATIENCE": 10,
+  "TARGET_ROC_AUC": 0.7,
+  "SEED": 42,
+  "USE_GPU": true,
+  "EARLY_STOPPING_PATIENCE": null,
+  "RANDOM_SEED": null,
+  "DEVICE": "cpu",
+  "TORCH_NUM_THREADS": 4,
+  "USE_AUGMENTATION": false,
+  "SMOKE_TEST": false,
+  "SMOKE_PATIENTS_PER_CLASS": 2,
+  "MAX_TRAIN_BATCHES": null,
+  "MAX_VAL_BATCHES": null,
+  "RUN_NAME": "P3_03",
+  "RESULTS_DIR": "models",
+  "SAVE_EVERY": 1,
+  "PRIMARY_METRIC": "patient_auc",
+  "STATS_PATH": null,
+  "STATS_PROVENANCE": "legacy_unverified",
+  "STATS_PREPROCESSING": {
+    "INPUT_MODE": "enhancement",
+    "USE_CLIPPING": true,
+    "CHANNEL_P01": [
+      0.0,
+      -0.109803915,
+      -0.1058823615
+    ],
+    "CHANNEL_P99": [
+      0.6705882549,
+      0.6509803534,
+      0.6235294342
+    ]
+  },
+  "TRAIN_PATIENTS_PER_CLASS": null,
+  "COMPARISON_PARENT": "P3_01"
+}

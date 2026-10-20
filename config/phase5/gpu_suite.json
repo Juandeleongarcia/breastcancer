@@ -1,0 +1,24 @@
+{
+  "experiments": [
+    {
+      "id": "BASE_UNWEIGHT",
+      "config": "config/phase5/gpu/BASE_UNWEIGHT.json"
+    },
+    {
+      "id": "SPATIAL_UNWEIGHT",
+      "config": "config/phase5/gpu/SPATIAL_UNWEIGHT.json"
+    },
+    {
+      "id": "AUG_UNWEIGHT",
+      "config": "config/phase5/gpu/AUG_UNWEIGHT.json"
+    },
+    {
+      "id": "BASE_WEIGHTED_NOCLIP",
+      "config": "config/phase5/gpu/BASE_WEIGHTED_NOCLIP.json"
+    },
+    {
+      "id": "RAW_WEIGHTED_NOCLIP",
+      "config": "config/phase5/gpu/RAW_WEIGHTED_NOCLIP.json"
+    }
+  ]
+}

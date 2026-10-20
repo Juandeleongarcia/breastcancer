@@ -221,3 +221,35 @@ __marimo__/
 dataset/
 
 models/
+
+# Datos, resultados y copias locales: nunca publicar.
+/breastdcedl/
+/backups/
+checkpoints/
+weights/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.h5
+*.hdf5
+*.pkl
+*.joblib
+*.dcm
+*.dicom
+*.nii
+*.nii.gz
+*.mha
+*.mhd
+*.nrrd
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.bmp
+*.npy
+*.npz
+/venv*/
+/.venv*/

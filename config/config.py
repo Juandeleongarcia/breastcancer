@@ -197,3 +197,41 @@ SEED = 42
 
 # Si la GPU está disponible se utilizará automáticamente.
 USE_GPU = True
+
+# Opciones nuevas; los valores originales del baseline se conservan arriba.
+# None conserva PATIENCE/SEED como fuente para los nombres históricos.
+EARLY_STOPPING_PATIENCE = None
+RANDOM_SEED = None
+DEVICE = "auto"  # auto, cpu o cuda; auto respeta USE_GPU
+TORCH_NUM_THREADS = 4
+USE_AUGMENTATION = False  # volteos geométricos conjuntos, solo train
+SMOKE_TEST = False
+SMOKE_PATIENTS_PER_CLASS = 2
+MAX_TRAIN_BATCHES = None
+MAX_VAL_BATCHES = None
+RUN_NAME = None  # sufijo descriptivo; el identificador siempre es único
+RESULTS_DIR = "models"
+SAVE_EVERY = 1
+PRIMARY_METRIC = "patient_auc"
+STATS_PATH = None
+STATS_PROVENANCE = "legacy_unverified"  # constantes conservadas del Run 005
+STATS_PREPROCESSING = {
+    "INPUT_MODE": "enhancement",
+    "USE_CLIPPING": True,
+    "CHANNEL_P01": [0.0, -0.1098039150, -0.1058823615],
+    "CHANNEL_P99": [0.6705882549, 0.6509803534, 0.6235294342],
+}
+
+# Fase 4: valores neutros que mantienen exactamente la arquitectura y dinámica originales.
+CONVS_PER_BLOCK = 1
+SCHEDULER = "none"  # none o plateau (AUC de paciente, mode=max)
+SCHEDULER_FACTOR = 0.5
+SCHEDULER_PATIENCE = 2
+SCHEDULER_MIN_LR = 0.000001
+
+# Fase 5: la opción histórica conserva sus volteos; el nuevo protocolo es explícito.
+AUGMENTATION_MODE = "legacy_flips"
+AUGMENT_PROBABILITY = 0.8
+AUGMENT_DEGREES = 5.0
+AUGMENT_TRANSLATE = 0.02
+AUGMENT_SCALE_DELTA = 0.02

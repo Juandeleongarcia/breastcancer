@@ -7,6 +7,8 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
+from src.configuration import resolve_config, project_path
+
 from config.config import (
     IMAGE_SIZE,
     INPUT_MODE,
@@ -39,15 +41,25 @@ class BreastDCEDataset(Dataset):
         csv_path="metadata/samples.csv",
         root_dir="breastdcedl",
         split=None,
+        config=None,
+        standardize=None,
+        augment=False,
     ):
 
-        self.root_dir = Path(root_dir)
+        self.config = resolve_config(config)
+        if standardize is not None:
+            self.config["USE_STANDARDIZATION"] = standardize
+        self.augment = augment and self.config["USE_AUGMENTATION"]
+        self.root_dir = project_path(root_dir)
 
-        self.df = pd.read_csv(csv_path)
+        self.df = pd.read_csv(project_path(csv_path))
 
         # =================================================
         # SPLIT
         # =================================================
+
+        if split is not None and "split" not in self.df.columns:
+            raise ValueError("No se puede filtrar split: falta la columna")
 
         # Si utilizamos internal_train.csv o internal_val.csv,
         # pasaremos split=None porque ya están separados.
@@ -106,6 +118,12 @@ class BreastDCEDataset(Dataset):
                 f"{missing_columns}"
             )
 
+        if self.df[required_columns].isna().any().any():
+            raise ValueError("Hay identificadores, rutas o etiquetas ausentes")
+        for name in ["CHANNEL_P01", "CHANNEL_P99", "CHANNEL_MEANS", "CHANNEL_STDS"]:
+            if not np.isfinite(self.config[name]).all():
+                raise ValueError(f"{name} contiene valores no finitos")
+
         # =================================================
         # COMPROBACIÓN INPUT MODE
         # =================================================
@@ -115,10 +133,10 @@ class BreastDCEDataset(Dataset):
             "enhancement",
         ]
 
-        if INPUT_MODE not in valid_input_modes:
+        if self.config["INPUT_MODE"] not in valid_input_modes:
 
             raise ValueError(
-                f"INPUT_MODE='{INPUT_MODE}' no válido. "
+                f"INPUT_MODE='{self.config['INPUT_MODE']}' no válido. "
                 f"Opciones disponibles: {valid_input_modes}"
             )
 
@@ -126,15 +144,15 @@ class BreastDCEDataset(Dataset):
         # COMPROBACIÓN CLIPPING
         # =================================================
 
-        if USE_CLIPPING:
+        if self.config["USE_CLIPPING"]:
 
-            if len(CHANNEL_P01) != 3:
+            if len(self.config["CHANNEL_P01"]) != 3:
 
                 raise ValueError(
                     "CHANNEL_P01 debe contener 3 valores."
                 )
 
-            if len(CHANNEL_P99) != 3:
+            if len(self.config["CHANNEL_P99"]) != 3:
 
                 raise ValueError(
                     "CHANNEL_P99 debe contener 3 valores."
@@ -143,8 +161,8 @@ class BreastDCEDataset(Dataset):
             for channel_index in range(3):
 
                 if (
-                    CHANNEL_P01[channel_index]
-                    >= CHANNEL_P99[channel_index]
+                    self.config["CHANNEL_P01"][channel_index]
+                    >= self.config["CHANNEL_P99"][channel_index]
                 ):
 
                     raise ValueError(
@@ -157,15 +175,15 @@ class BreastDCEDataset(Dataset):
         # COMPROBACIÓN ESTANDARIZACIÓN
         # =================================================
 
-        if USE_STANDARDIZATION:
+        if self.config["USE_STANDARDIZATION"]:
 
-            if len(CHANNEL_MEANS) != 3:
+            if len(self.config["CHANNEL_MEANS"]) != 3:
 
                 raise ValueError(
                     "CHANNEL_MEANS debe contener 3 valores."
                 )
 
-            if len(CHANNEL_STDS) != 3:
+            if len(self.config["CHANNEL_STDS"]) != 3:
 
                 raise ValueError(
                     "CHANNEL_STDS debe contener 3 valores."
@@ -173,12 +191,19 @@ class BreastDCEDataset(Dataset):
 
             if any(
                 std <= 0
-                for std in CHANNEL_STDS
+                for std in self.config["CHANNEL_STDS"]
             ):
 
                 raise ValueError(
                     "Todos los CHANNEL_STDS deben ser > 0."
                 )
+
+        if not self.df["pCR"].isin([0, 1]).all():
+            raise ValueError("pCR debe contener únicamente 0 o 1")
+        if self.df.groupby("patient_id")["pCR"].nunique().gt(1).any():
+            raise ValueError("Una paciente tiene etiquetas contradictorias")
+        if self.df["sample_id"].duplicated().any():
+            raise ValueError("sample_id duplicado")
 
     def __len__(self):
 
@@ -219,8 +244,8 @@ class BreastDCEDataset(Dataset):
         )
 
         expected_size = (
-            IMAGE_SIZE,
-            IMAGE_SIZE,
+            self.config["IMAGE_SIZE"],
+            self.config["IMAGE_SIZE"],
         )
 
         if image.size != expected_size:
@@ -276,7 +301,7 @@ class BreastDCEDataset(Dataset):
             canal 2 -> LATE - PRE
         """
 
-        if INPUT_MODE == "raw":
+        if self.config["INPUT_MODE"] == "raw":
 
             channels = [
                 pre,
@@ -284,7 +309,7 @@ class BreastDCEDataset(Dataset):
                 late,
             ]
 
-        elif INPUT_MODE == "enhancement":
+        elif self.config["INPUT_MODE"] == "enhancement":
 
             early_enhancement = (
                 early - pre
@@ -303,7 +328,7 @@ class BreastDCEDataset(Dataset):
         else:
 
             raise ValueError(
-                f"INPUT_MODE no reconocido: {INPUT_MODE}"
+                f"INPUT_MODE no reconocido: {self.config['INPUT_MODE']}"
             )
 
         image = torch.stack(
@@ -328,7 +353,7 @@ class BreastDCEDataset(Dataset):
         utilizando únicamente TRAIN.
         """
 
-        if not USE_CLIPPING:
+        if not self.config["USE_CLIPPING"]:
 
             return image
 
@@ -338,8 +363,8 @@ class BreastDCEDataset(Dataset):
 
             image[channel_index] = torch.clamp(
                 image[channel_index],
-                min=CHANNEL_P01[channel_index],
-                max=CHANNEL_P99[channel_index],
+                min=self.config["CHANNEL_P01"][channel_index],
+                max=self.config["CHANNEL_P99"][channel_index],
             )
 
         return image
@@ -361,7 +386,7 @@ class BreastDCEDataset(Dataset):
         con el conjunto de entrenamiento.
         """
 
-        if not USE_STANDARDIZATION:
+        if not self.config["USE_STANDARDIZATION"]:
 
             return image
 
@@ -369,11 +394,11 @@ class BreastDCEDataset(Dataset):
 
         for channel_index in range(3):
 
-            mean = CHANNEL_MEANS[
+            mean = self.config["CHANNEL_MEANS"][
                 channel_index
             ]
 
-            std = CHANNEL_STDS[
+            std = self.config["CHANNEL_STDS"][
                 channel_index
             ]
 
@@ -433,6 +458,12 @@ class BreastDCEDataset(Dataset):
         # CLIPPING
         # -------------------------------------------------
 
+        # La interpolación conjunta precede al recorte no lineal y al z-score.
+        # En validación self.augment=False, sin consumir números aleatorios.
+        if self.augment and self.config['AUGMENTATION_MODE'] == 'gentle_affine':
+            from src.augmentation import synchronized_affine
+            image = synchronized_affine(image, self.config)
+
         image = (
             self._clip_channels(
                 image
@@ -486,6 +517,11 @@ class BreastDCEDataset(Dataset):
                 row["slice_index"]
             )
 
+        if self.augment and self.config['AUGMENTATION_MODE'] == 'legacy_flips':
+            if torch.rand(()).item() < 0.5:
+                sample["image"] = torch.flip(sample["image"], dims=[2])
+            if torch.rand(()).item() < 0.5:
+                sample["image"] = torch.flip(sample["image"], dims=[1])
         return sample
 
 

@@ -1,0 +1,16 @@
+{
+  "experiments": [
+    {
+      "id": "SPATIAL_UNWEIGHT",
+      "config": "config/phase5/today/SPATIAL_UNWEIGHT.json"
+    },
+    {
+      "id": "AUG_UNWEIGHT",
+      "config": "config/phase5/today/AUG_UNWEIGHT.json"
+    },
+    {
+      "id": "RAW_WEIGHTED_NOCLIP",
+      "config": "config/phase5/today/RAW_WEIGHTED_NOCLIP.json"
+    }
+  ]
+}
