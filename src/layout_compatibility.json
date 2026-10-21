@@ -1,0 +1,21 @@
+{
+  "previous_sources": {
+    "src/model.py": "dfb3b711cc0663268456982d311965b5704a6428df968f4a62f4aa049eb2e594",
+    "src/dataset.py": "d773eb59d5a9b8642509ca2dfde5119714bdde0a79f73f3ecc093c50c7551379",
+    "src/experiment.py": "10ffa5c1e1e6e2544f0d6d9937577250bf1d379a55cfab3f24d646d5b29eb4cb",
+    "src/checkpointing.py": "5866f5cfab9ae80b82348207074f544e97586493d2871425838e973aee2d27bf",
+    "src/metrics.py": "9f1f15af2cbf9317d917e765beb9cb3a0b77c0b7312a6810ee99efd0c1324618",
+    "src/configuration.py": "fe4f2b8ab2fe7cb9f7b1d4b6d3b8ff807ce487d20c1e23e80d801a8d568efc0e",
+    "src/augmentation.py": "3807698920b0832604c1e2160631602f3aca4e340274bffde6a16f9388c46fbf"
+  },
+  "simple_layout_sources": {
+    "src/model.py": "dfb3b711cc0663268456982d311965b5704a6428df968f4a62f4aa049eb2e594",
+    "src/dataset.py": "d773eb59d5a9b8642509ca2dfde5119714bdde0a79f73f3ecc093c50c7551379",
+    "src/experiment.py": "af2ab30400d83a3770308c700f6b4eb9f2b728c61385182cbb7df7691b821054",
+    "src/checkpointing.py": "34b0520a38a4a46c9e098b1d1e4e5855d881d4054f2b9dce4002b414723fab6c",
+    "src/metrics.py": "bcbbf8bbf4bf53299ce435d508e489869035bf2d0bc861ae041928ee26e8dfcd",
+    "src/configuration.py": "fe4f2b8ab2fe7cb9f7b1d4b6d3b8ff807ce487d20c1e23e80d801a8d568efc0e",
+    "src/augmentation.py": "3807698920b0832604c1e2160631602f3aca4e340274bffde6a16f9388c46fbf",
+    "src/run_layout.py": "f21c3bf2206a380f5c3e0140ddb8bf80c1e325cabaeb63bea378835ec39d8f47"
+  }
+}

@@ -27,7 +27,7 @@ def contract(cfg):
     result = {key: cfg[key] for key in COMPATIBILITY_KEYS}
     result["TRAIN_PATIENTS_PER_CLASS"] = cfg.get("TRAIN_PATIENTS_PER_CLASS")
     result["csv_sha256"] = {"train": file_hash(cfg["TRAIN_CSV"]), "validation": file_hash(cfg["VAL_CSV"])}
-    sources = ["src/model.py", "src/dataset.py", "src/experiment.py", "src/checkpointing.py", "src/metrics.py", "src/configuration.py", "src/augmentation.py"]
+    sources = ["src/model.py", "src/dataset.py", "src/experiment.py", "src/checkpointing.py", "src/metrics.py", "src/configuration.py", "src/augmentation.py", "src/run_layout.py"]
     result["source_sha256"] = {name: hashlib.sha256(project_path(name).read_text(encoding="utf-8-sig").replace("\r\n", "\n").encode()).hexdigest() for name in sources}
     return result
 
@@ -35,6 +35,20 @@ def contract(cfg):
 def experiment_key(cfg):
     payload = dict(contract(cfg), requested_epochs=cfg["EPOCHS"])
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def compatible_experiment_keys(cfg):
+    """Omitir también completados del único formato anterior auditado."""
+    keys = {experiment_key(cfg)}
+    migration_path = project_path("src/layout_compatibility.json")
+    if migration_path.is_file():
+        migration = json.loads(migration_path.read_text(encoding="utf-8"))
+        current = contract(cfg)
+        if current["source_sha256"] == migration["simple_layout_sources"]:
+            current["source_sha256"] = migration["previous_sources"]
+            payload = dict(current, requested_epochs=cfg["EPOCHS"])
+            keys.add(hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest())
+    return keys
 
 
 def capture_rng(generator):
@@ -73,6 +87,15 @@ def load_resume(path, cfg):
     expected = contract(cfg)
     saved = checkpoint["training_contract"]
     differences = [key for key in expected if expected[key] != saved.get(key)]
+    if "source_sha256" in differences:
+        # Migración acotada: solo la pareja EXACTA de fuentes auditadas de este cambio.
+        # CSV, arquitectura, configuración, optimizador y scheduler siguen verificándose.
+        migration_path = project_path("src/layout_compatibility.json")
+        if migration_path.is_file():
+            migration = json.loads(migration_path.read_text(encoding="utf-8"))
+            if (saved.get("source_sha256") == migration["previous_sources"]
+                    and expected["source_sha256"] == migration["simple_layout_sources"]):
+                differences.remove("source_sha256")
     if differences:
         raise ValueError("Reanudación incompatible: " + ", ".join(differences))
     if cfg["EPOCHS"] <= checkpoint["epoch"]:

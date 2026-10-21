@@ -22,6 +22,7 @@ from src.configuration import (ROOT, resolve_config, project_path, file_hash, lo
                                preset_config, apply_statistics)
 from src.dataset import BreastDCEDataset
 from src.model import BreastCancerCNN
+from src.run_layout import run_root, checkpoint_directories
 from src.checkpointing import (contract, experiment_key, capture_rng, restore_rng, atomic_save, load_resume)
 from src.metrics import evaluate_predictions, save_evaluation_artifacts, plot_training_history, analyze_probabilities
 
@@ -56,16 +57,12 @@ def create_run_directory(config=None):
     cfg = resolve_config(config)
     root = project_path(cfg["RESULTS_DIR"])
     root.mkdir(parents=True, exist_ok=True)
-    # Inspección explícita: nunca reutilizar una numeración ausente en este equipo.
-    existing = sorted(p.name for p in root.iterdir() if p.is_dir())
     suffix = cfg.get("RUN_NAME") or "train"
     suffix = "".join(c if c.isalnum() or c in "_-" else "_" for c in suffix)
     stamp = datetime.now(ZoneInfo("Europe/Madrid")).strftime("%Y%m%d_%H%M%S")
     directory = root / f"RUN_{stamp}_{suffix}_{uuid4().hex[:12]}"
     directory.mkdir(exist_ok=False)
-    (directory / "details").mkdir()
-    (directory / "checkpoints").mkdir()
-    (directory / "details" / "existing_runs_local.json").write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    (directory / "internals").mkdir()
     return directory
 
 
@@ -219,22 +216,23 @@ def train(config=None, resume_from=None):
     if resume_from:
         name_cfg["RUN_NAME"] = f"{cfg.get('RUN_NAME') or 'train'}_RESUME_E{resume_payload['epoch']:03d}"
     directory = create_run_directory(name_cfg)
-    details = directory / "details"
-    checkpoints = directory / "checkpoints"
+    details = directory / "internals"
+    checkpoints = directory
     cfg["DIAGNOSTIC_PARTIAL"] = bool(cfg["SMOKE_TEST"] or cfg["MAX_TRAIN_BATCHES"] or cfg["MAX_VAL_BATCHES"] or cfg.get("TRAIN_PATIENTS_PER_CLASS"))
     (details / "config.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    (details / "config.py").write_text("# Snapshot exacto; no modifica config/config.py\n" +
+    (directory / "config.py").write_text("# Snapshot exacto; no modifica config/config.py\n# Train online: pesos cambiantes, dropout/augmentation según configuración.\n# Validación: pesos fijos al final de época, modo eval, sin augmentation.\n" +
         "\n".join(f"{key} = {value!r}" for key, value in cfg.items()), encoding="utf-8")
     env = environment_info(device)
     (details / "environment.json").write_text(json.dumps(env, indent=2), encoding="utf-8")
-    # Las fuentes exactas resuelven el caso habitual de trabajo sin commit.
-    import shutil
-    for source in ["src/model.py", "src/dataset.py", "src/experiment.py", "src/metrics.py", "src/configuration.py", "src/checkpointing.py", "src/augmentation.py"]:
-        target = details / "sources" / source
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(project_path(source), target)
-    for name, ds in [("train", train_ds), ("validation", val_ds)]:
-        ds.df.to_csv(details / f"{name}_selection.csv", index=False)
+    # Un solo archivo comprimido conserva las fuentes sin un árbol técnico adicional.
+    from zipfile import ZipFile, ZIP_DEFLATED
+    with ZipFile(details / "sources.zip", "w", compression=ZIP_DEFLATED) as sources:
+        for source in ["src/model.py", "src/dataset.py", "src/experiment.py", "src/metrics.py",
+                       "src/configuration.py", "src/checkpointing.py", "src/augmentation.py", "src/run_layout.py"]:
+            sources.write(project_path(source), source)
+    if cfg["DIAGNOSTIC_PARTIAL"]:
+        for name, ds in [("train", train_ds), ("validation", val_ds)]:
+            ds.df.to_csv(details / f"{name}_selection.csv", index=False)
     hashes = {name: file_hash(cfg[key]) for name, key in [("train", "TRAIN_CSV"), ("validation", "VAL_CSV")]}
     generator = torch.Generator().manual_seed(cfg["SEED"])
     loader_kw = dict(batch_size=cfg["BATCH_SIZE"], num_workers=cfg["NUM_WORKERS"], pin_memory=device.type == "cuda")
@@ -266,9 +264,24 @@ def train(config=None, resume_from=None):
         if best_weights is not None:
             best_result = evaluate_predictions(resume_payload["best_slice_predictions"], cfg["CLASSIFICATION_THRESHOLD"])
             best_result.update(loss=resume_payload["best_validation_loss"], diagnostic_partial=cfg["DIAGNOSTIC_PARTIAL"])
-            # Pesos heredados para inferencia; no se inventa el optimizador de esa época anterior.
-            atomic_save(dict(config=cfg, epoch=best_epoch, model_state_dict=best_weights, pos_weight=weight,
-                             csv_sha256=hashes, resume_supported=False, inherited_best=True), checkpoints / "best_epoch.pt")
+            # Conservar también el estado completo del mejor checkpoint heredado.
+            candidates = [folder/name for folder in checkpoint_directories(run_root(project_path(resume_from)))
+                          for name in [f"epoch_{best_epoch:03d}.pt", "best_epoch.pt"]]
+            source_best = None
+            for path in candidates:
+                if path.is_file():
+                    candidate = torch.load(path, map_location="cpu", weights_only=True)
+                    weights = candidate.get("model_state_dict", {})
+                    if (candidate.get("epoch") == best_epoch and set(weights) == set(best_weights)
+                            and all(torch.equal(weights[key], best_weights[key]) for key in weights)):
+                        source_best = path
+                        break
+            if source_best is not None:
+                import shutil
+                shutil.copy2(source_best, checkpoints / "best_epoch.pt")
+            else:
+                atomic_save(dict(config=cfg, epoch=best_epoch, model_state_dict=best_weights, pos_weight=weight,
+                                 csv_sha256=hashes, resume_supported=False, inherited_best=True), checkpoints / "best_epoch.pt")
         pd.DataFrame(history).to_csv(directory / "history.csv", index=False)
         (details / "resume.json").write_text(json.dumps(dict(source=str(resume_from),
             completed_epoch=resume_payload["epoch"], source_device=resume_payload["device"],
@@ -295,7 +308,7 @@ def train(config=None, resume_from=None):
     for epoch in range(start_epoch, cfg["EPOCHS"] + 1):
         epoch_start = time.perf_counter()
         lr_used = optimizer.param_groups[0]["lr"]
-        recovery = checkpoints / f"recovery_epoch_start_{epoch:03d}.pt"
+        recovery = details / "recovery_epoch_start.pt"
         atomic_save(snapshot(epoch-1), recovery)
         try:
             tr = run_epoch(model, train_loader, criterion, device, optimizer, cfg["MAX_TRAIN_BATCHES"], cfg["CLASSIFICATION_THRESHOLD"], cfg.get("DEADLINE_UNIX"))
@@ -305,24 +318,24 @@ def train(config=None, resume_from=None):
             stop_reason = "interrumpido_por_usuario" if isinstance(error, KeyboardInterrupt) else "interrumpido_por_presupuesto"
             partial = snapshot(epoch, complete=False)
             partial["recovery_checkpoint"] = str(recovery)
-            atomic_save(partial, checkpoints / f"interrupted_epoch_{epoch:03d}.pt")
+            atomic_save(partial, details / f"interrupted_epoch_{epoch:03d}.pt")
             print("Interrupción: pesos parciales conservados; reanudar desde el checkpoint de inicio de época.", flush=True)
             break
         except Exception:
             partial = snapshot(epoch, complete=False)
             partial["recovery_checkpoint"] = str(recovery)
-            atomic_save(partial, checkpoints / f"failed_epoch_{epoch:03d}.pt")
+            atomic_save(partial, details / f"failed_epoch_{epoch:03d}.pt")
             raise
         row = dict(epoch=epoch, learning_rate=lr_used, train_loss=tr["loss"], val_loss=va["loss"],
                    epoch_time_seconds=time.perf_counter() - epoch_start,
-                   diagnostic_partial=cfg["DIAGNOSTIC_PARTIAL"])
+                   diagnostic_partial=cfg["DIAGNOSTIC_PARTIAL"],
+                   train_metric_protocol="online_changing_weights_dropout_augmentation",
+                   validation_metric_protocol="end_of_epoch_eval_no_augmentation")
         for partition, result in [("train", tr), ("val", va)]:
             for level in ["slice", "patient"]:
                 for key, value in result[level].items():
                     if key != "confusion_matrix":
                         row[f"{partition}_{level}_{key}"] = value
-            for key in ["auc", "accuracy", "sensitivity", "specificity"]:
-                row[f"{partition}_{key}"] = result["slice"][key]
         history.append(row)
         pd.DataFrame(history).to_csv(directory / "history.csv", index=False)
         score = va["patient"]["auc"]
@@ -341,16 +354,14 @@ def train(config=None, resume_from=None):
         last_tr, last_va = scalar_metrics(tr), scalar_metrics(va)
         checkpoint = snapshot(epoch)
         checkpoint.update(val_auc=va["slice"]["auc"], val_patient_auc=score)
-        if epoch % cfg["SAVE_EVERY"] == 0 or epoch == cfg["EPOCHS"]:
-            atomic_save(checkpoint, checkpoints / f"epoch_{epoch:03d}.pt")
-        atomic_save(checkpoint, checkpoints / "last_epoch.pt")
-        for name, result in [("train", tr), ("validation", va)]:
-            output = details / f"epoch_{epoch:03d}" / name
-            output.mkdir(parents=True, exist_ok=True)
-            for level in ["slice", "patient"]:
-                result[f"{level}_predictions"].to_csv(output / f"predictions_{level}.csv", index=False)
+        # Cada época completa se conserva, independientemente del antiguo SAVE_EVERY.
+        atomic_save(checkpoint, checkpoints / f"epoch_{epoch:03d}.pt")
+        # El checkpoint de época ya contiene todo el estado; evitar duplicar last_epoch.
+        recovery.unlink(missing_ok=True)
         if improved:
             atomic_save(checkpoint, checkpoints / "best_epoch.pt")
+            save_evaluation_artifacts(best_result, directory, details, simple=True)
+        plot_training_history(directory / "history.csv", directory)
         print(f"Época {epoch}: train loss={tr['loss']:.5f}; val loss={va['loss']:.5f}; "
               f"AUC paciente={score:.5f}; AUC corte={va['slice']['auc']:.5f}; {row['epoch_time_seconds']:.2f}s", flush=True)
         if cfg["USE_EARLY_STOPPING"] and waiting >= cfg["PATIENCE"]:
@@ -359,22 +370,18 @@ def train(config=None, resume_from=None):
         if budget_stopped:
             summary = dict(run=directory.name, experiment=cfg.get("RUN_NAME"), status=stop_reason,
                            epochs_completed=0, seconds=time.perf_counter()-start, diagnostic_partial=True)
-            (directory / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+            (details / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
             return directory, summary
         raise RuntimeError("No se pudo seleccionar un checkpoint con AUC de paciente finito")
-    save_evaluation_artifacts(best_result, directory, details / "best_predictions")
-    diagnostics = analyze_probabilities(best_result, directory, details)
+    save_evaluation_artifacts(best_result, directory, details, simple=True)
+    diagnostics = analyze_probabilities(best_result, details, details)
     plot_training_history(directory / "history.csv", directory)
-    compact_columns = ["epoch", "train_loss", "val_loss", "val_patient_auc", "val_slice_auc",
-                       "val_patient_accuracy", "val_patient_precision", "val_patient_recall", "val_patient_f1",
-                       "val_patient_specificity", "epoch_time_seconds"]
-    pd.DataFrame(history)[compact_columns].to_csv(directory / "epoch_summary.csv", index=False)
     summary = dict(run=directory.name, experiment=cfg.get("RUN_NAME"), cnn=cfg["CONV_CHANNELS"],
                    weighted_loss=cfg["USE_WEIGHTED_LOSS"], clipping=cfg["USE_CLIPPING"],
                    epochs_completed=len(history), best_epoch=best_epoch,
                    diagnostic_partial=cfg["DIAGNOSTIC_PARTIAL"],
                    status=stop_reason if budget_stopped else ("preliminar_train_parcial" if cfg["DIAGNOSTIC_PARTIAL"] else "entrenamiento_completo"),
-                   layout_version=4, requested_epochs=cfg["EPOCHS"], input_mode=cfg["INPUT_MODE"],
+                   layout_version=5, requested_epochs=cfg["EPOCHS"], input_mode=cfg["INPUT_MODE"],
                    interpretation=cfg.get("INTERPRETATION", "experimento_exploratorio"),
                    convolutions_per_block=cfg["CONVS_PER_BLOCK"], scheduler=cfg["SCHEDULER"],
                    experiment_key=experiment_key(cfg), resumed_from=str(resume_from) if resume_from else None,
@@ -388,8 +395,7 @@ def train(config=None, resume_from=None):
                    pos_weight=weight, csv_sha256=hashes,
                    train_metric_note="Métricas online: parámetros y dropout cambian durante la época",
                    cuda_peak_memory_bytes=torch.cuda.max_memory_allocated(device) if device.type == "cuda" else None)
-    (directory / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    (directory / "summary.txt").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    (details / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     patient = best_result["patient"]
     patient_probs = diagnostics["patient"]
     analysis = (f"# Análisis del run {directory.name}\n\n"
@@ -399,7 +405,7 @@ def train(config=None, resume_from=None):
                 f"Distribuciones: {json.dumps(patient_probs['by_label'], ensure_ascii=False)}\n\n"
                 "Umbral fijo 0.50. El AUC usa puntuaciones continuas y no se modifica mediante el umbral.\n"
                 "Las épocas iniciales diagnostican aprendizaje temprano; no establecen superioridad estable.\n")
-    (directory / "analysis.md").write_text(analysis, encoding="utf-8")
+    (details / "analysis.md").write_text(analysis, encoding="utf-8")
     print(f"Mejor época por AUC de paciente: {best_epoch}; resultados: {directory}", flush=True)
     return directory, summary
 

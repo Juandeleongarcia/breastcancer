@@ -43,11 +43,11 @@ class Phase3Tests(unittest.TestCase):
                 NUM_WORKERS=0, BATCH_SIZE=4, EPOCHS=1, DEVICE="cpu", RUN_NAME="unit_layout"))
             directory, summary = train(cfg)
             self.assertTrue((directory/"history.csv").exists())
-            self.assertTrue((directory/"epoch_summary.csv").exists())
-            self.assertTrue((directory/"details/config.json").exists())
-            self.assertTrue((directory/"checkpoints/best_epoch.pt").exists())
-            self.assertFalse((directory/"best_epoch.pt").exists())
-            saved = torch.load(directory/"checkpoints/best_epoch.pt", weights_only=True)
+            self.assertTrue((directory/"config.py").exists())
+            self.assertTrue((directory/"internals/config.json").exists())
+            self.assertTrue((directory/"best_epoch.pt").exists())
+            self.assertFalse((directory/"checkpoints").exists())
+            saved = torch.load(directory/"best_epoch.pt", weights_only=True)
             saved["config"]["DEADLINE_UNIX"] = time.time()-10
             test_checkpoint = root/"expired_deadline.pt"
             torch.save(saved, test_checkpoint)
@@ -56,8 +56,8 @@ class Phase3Tests(unittest.TestCase):
             cfg["DEADLINE_UNIX"] = time.time()-1
             interrupted_dir, interrupted = train(cfg)
             self.assertEqual(interrupted["epochs_completed"], 0)
-            self.assertTrue((interrupted_dir/"checkpoints/interrupted_epoch_001.pt").exists())
-            self.assertFalse((interrupted_dir/"checkpoints/best_epoch.pt").exists())
+            self.assertTrue((interrupted_dir/"internals/interrupted_epoch_001.pt").exists())
+            self.assertFalse((interrupted_dir/"best_epoch.pt").exists())
 
 
 if __name__ == "__main__":

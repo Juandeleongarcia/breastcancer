@@ -13,9 +13,10 @@ import torch
 import pandas as pd
 
 from src.configuration import ROOT, load_config, resolve_config, project_path, apply_statistics
-from src.checkpointing import experiment_key, load_resume
+from src.checkpointing import experiment_key, load_resume, compatible_experiment_keys
 from src.experiment import train, select_device
 from src.compare_runs import comparison
+from src.run_layout import summary_paths, technical_file, checkpoint_directories
 from src.resume_validation import validate_resume_environment
 
 
@@ -50,31 +51,35 @@ def resolve_job(path, device, epochs=None):
 
 
 def completed_run(cfg):
-    key = experiment_key(cfg)
-    for path in sorted(project_path(cfg["RESULTS_DIR"]).glob("RUN_*/summary.json"), reverse=True):
+    keys = compatible_experiment_keys(cfg)
+    for path in reversed(summary_paths(project_path(cfg["RESULTS_DIR"]))):
         summary = json.loads(path.read_text(encoding="utf-8"))
-        if (summary.get("experiment_key") == key and summary.get("status") == "entrenamiento_completo"
-                and not summary.get("diagnostic_partial") and (path.parent/"checkpoints/best_epoch.pt").exists()):
-            return path.parent
+        directory = path.parent.parent if path.parent.name == "internals" else path.parent
+        if (summary.get("experiment_key") in keys and summary.get("status") == "entrenamiento_completo"
+                and not summary.get("diagnostic_partial") and any((folder/"best_epoch.pt").exists() for folder in checkpoint_directories(directory))):
+            return directory
     return None
 
 
 def interrupted_checkpoint(cfg):
     candidates = []
     key = experiment_key(cfg)
-    for details in project_path(cfg["RESULTS_DIR"]).glob("RUN_*/details/config.json"):
+    for directory in project_path(cfg["RESULTS_DIR"]).glob("RUN_*"):
+        details = technical_file(directory, "config.json")
+        if not details.exists():
+            continue
         saved = resolve_config(load_config(details))
         if experiment_key(saved) != key:
             continue
-        directory = details.parent.parent
-        for pattern in ["epoch_*.pt", "recovery_epoch_start_*.pt"]:
-            for path in (directory/"checkpoints").glob(pattern):
-                try:
-                    validate_resume_environment(path)
-                    payload = load_resume(path, cfg)
-                    candidates.append((payload["epoch"], path.stat().st_mtime_ns, path))
-                except (ValueError, RuntimeError, OSError):
-                    continue
+        paths = {path for folder in checkpoint_directories(directory)
+                 for pattern in ["epoch_*.pt", "recovery_epoch_start*.pt"] for path in folder.glob(pattern)}
+        for path in paths:
+            try:
+                validate_resume_environment(path)
+                payload = load_resume(path, cfg)
+                candidates.append((payload["epoch"], path.stat().st_mtime_ns, path))
+            except (ValueError, RuntimeError, OSError):
+                continue
     return max(candidates)[2] if candidates else None
 
 

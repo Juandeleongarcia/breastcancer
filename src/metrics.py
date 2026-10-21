@@ -54,7 +54,7 @@ def evaluate_predictions(rows, threshold=0.5):
             "slice_predictions": frame, "patient_predictions": patients}
 
 
-def save_evaluation_artifacts(result, output_dir, predictions_dir=None):
+def save_evaluation_artifacts(result, output_dir, predictions_dir=None, simple=False):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     predictions_dir = Path(predictions_dir) if predictions_dir else output_dir
@@ -63,8 +63,8 @@ def save_evaluation_artifacts(result, output_dir, predictions_dir=None):
         frame = result[f"{level}_predictions"]
         frame.to_csv(predictions_dir / f"predictions_{level}.csv", index=False)
         if frame.label.nunique() == 2:
-            plot_roc_curve(frame.label, frame.probability, output_dir / f"roc_curve_{level}.png",
-                           title=f"ROC por {level}")
+            plot_roc_curve(frame.label, frame.probability, (output_dir / "roc_curve.png" if simple and level == "patient" else predictions_dir / f"roc_curve_{level}.png" if simple else output_dir / f"roc_curve_{level}.png"),
+                           title="Validación interna por paciente · mejor checkpoint" if simple and level == "patient" else f"ROC por {level}")
         fig, ax = plt.subplots(figsize=(5, 4))
         matrix = np.asarray(result[level]["confusion_matrix"])
         ax.imshow(matrix, cmap="Blues")
@@ -74,7 +74,7 @@ def save_evaluation_artifacts(result, output_dir, predictions_dir=None):
         ax.set(xticks=[0, 1], yticks=[0, 1], xticklabels=["no pCR", "pCR"],
                yticklabels=["no pCR", "pCR"], xlabel="Predicción", ylabel="Real", title=f"Matriz por {level}")
         fig.tight_layout()
-        fig.savefig(output_dir / f"confusion_matrix_{level}.png", dpi=150)
+        fig.savefig((predictions_dir if simple else output_dir) / f"confusion_matrix_{level}.png", dpi=150)
         plt.close(fig)
 
 
@@ -275,175 +275,42 @@ def calculate_confusion_metrics(
             negative_predictive_value,
     }
 
-def plot_training_history(
-    history_path="models/history.csv",
-    output_dir="models",
-):
-    """
-    Genera las curvas de entrenamiento:
-    - Train Loss vs Validation Loss
-    - Train Accuracy vs Validation Accuracy
-    - Train AUC vs Validation AUC
-    """
+def plot_training_history(history_path="models/history.csv", output_dir="models"):
+    """Tres curvas sin aliases: paciente para accuracy/AUC; BCE por corte para loss.
 
-    import pandas as pd
-
+    Train es online con pesos cambiantes, dropout y augmentation si está activa.
+    La validación usa pesos fijos al final de época, modo eval y sin augmentation.
+    No son estimaciones equivalentes del mismo protocolo de evaluación.
+    """
     history = pd.read_csv(history_path)
-
     output_dir = Path(output_dir)
-
-    output_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    # =====================================================
-    # LOSS
-    # =====================================================
-
-    plt.figure(figsize=(7, 6))
-
-    plt.plot(
-        history["epoch"],
-        history["train_loss"],
-        label="Train Loss",
-    )
-
-    plt.plot(
-        history["epoch"],
-        history["val_loss"],
-        label="Validation Loss",
-    )
-
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("Training and Validation Loss")
-    plt.legend()
-    plt.grid(alpha=0.3)
-    plt.tight_layout()
-
-    plt.savefig(
-        output_dir / "loss_curve.png",
-        dpi=300,
-        bbox_inches="tight",
-    )
-
-    plt.close()
-
-    # =====================================================
-    # ACCURACY
-    # =====================================================
-
-    plt.figure(figsize=(7, 6))
-
-    plt.plot(
-        history["epoch"],
-        history["train_accuracy"],
-        label="Train Accuracy",
-    )
-
-    plt.plot(
-        history["epoch"],
-        history["val_accuracy"],
-        label="Validation Accuracy",
-    )
-
-    plt.ylim(0, 1)
-    plt.xticks(history["epoch"])
-
-    plt.xlabel("Epoch")
-    plt.ylabel("Accuracy")
-    plt.title("Training and Validation Accuracy")
-    plt.legend()
-    plt.grid(alpha=0.3)
-    plt.tight_layout()
-
-    plt.savefig(
-        output_dir / "accuracy_curve.png",
-        dpi=300,
-        bbox_inches="tight",
-    )
-
-    plt.close()
-
-    # =====================================================
-    # AUC
-    # =====================================================
-
-    plt.figure(figsize=(7, 6))
-
-    plt.plot(
-        history["epoch"],
-        history["train_auc"],
-        label="Train AUC",
-    )
-
-    plt.plot(
-        history["epoch"],
-        history["val_auc"],
-        label="Validation AUC",
-    )
-
-    plt.ylim(0, 1)
-    plt.xticks(history["epoch"])
-
-    plt.axhline(
-        y=0.70,
-        linestyle="--",
-        label="Target AUC = 0.70",
-    )
-
-    plt.xlabel("Epoch")
-    plt.ylabel("ROC-AUC")
-    plt.title("Training and Validation ROC-AUC")
-    plt.legend()
-    plt.grid(alpha=0.3)
-    plt.tight_layout()
-
-    plt.savefig(
-        output_dir / "auc_curve.png",
-        dpi=300,
-        bbox_inches="tight",
-    )
-
-    plt.close()
-
-    print(
-        "Curvas de entrenamiento guardadas en:",
-        output_dir,
-    )
-
-    # Nombres nuevos sin perder los nombres históricos de las gráficas.
-    import shutil
-    shutil.copy2(output_dir / "loss_curve.png", output_dir / "loss_history.png")
-    if "val_patient_auc" in history:
-        fig, ax = plt.subplots(figsize=(7, 5))
-        ax.plot(history.epoch, history.train_patient_auc, label="Train online, paciente")
-        ax.plot(history.epoch, history.val_patient_auc, label="Validación, paciente")
-        ax.set(xlabel="Época", ylabel="ROC AUC por paciente")
-        ax.set_ylim(0, 1)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    patient = "val_patient_auc" in history
+    for metric, ylabel, title in [
+        ("loss", "BCE media por corte (ponderada si se configuró)", "Loss por corte"),
+        ("accuracy", "Accuracy por paciente" if patient else "Accuracy por corte (histórico)", "Accuracy"),
+        ("auc", "ROC AUC por paciente" if patient else "ROC AUC por corte (histórico)", "ROC AUC")]:
+        level = "patient_" if patient and metric != "loss" else ""
+        fig, ax = plt.subplots(figsize=(9, 5.5))
+        ax.plot(history.epoch, history[f"train_{level}{metric}"], "o--", color="#777777",
+                label="Train online: pesos cambiantes; dropout/augment. según config")
+        ax.plot(history.epoch, history[f"val_{level}{metric}"], "o-", linewidth=2.5, color="#1764ab",
+                label="Validación interna: fin de época, eval, sin augmentation")
+        if metric != "loss":
+            ax.set_ylim(0, 1)
+        if metric == "auc":
+            ax.axhline(.5, color="black", linestyle=":", label="Azar: AUC = 0,50")
+        for epoch, value in zip(history.epoch, history[f"val_{level}{metric}"]):
+            if np.isfinite(value):
+                ax.annotate(f"{value:.3f}", (epoch, value), xytext=(0, 8),
+                            textcoords="offset points", ha="center", fontsize=8)
+        ax.set(xlabel="Época", ylabel=ylabel,
+               title=title + (" · métrica principal por paciente" if metric == "auc" and patient else ""))
         ax.set_xticks(history.epoch)
-        ax.legend()
-        fig.tight_layout()
-        fig.savefig(output_dir / "auc_history.png", dpi=150)
+        ax.grid(alpha=.25)
+        ax.legend(fontsize=8, loc="best")
+        fig.text(.5, .015, "Train online y validación final usan protocolos distintos: interpretar la diferencia con cautela.",
+                 ha="center", fontsize=8)
+        fig.tight_layout(rect=(0, .035, 1, 1))
+        fig.savefig(output_dir / f"{metric}_curve.png", dpi=160)
         plt.close(fig)
-        for metric in ["accuracy", "auc"]:
-            for level in ["patient", "slice"]:
-                fig, ax = plt.subplots(figsize=(7, 4))
-                ax.plot(history.epoch, history[f"train_{level}_{metric}"], marker="o", label="Train online")
-                ax.plot(history.epoch, history[f"val_{level}_{metric}"], marker="o", label="Validación")
-                label = "paciente" if level == "patient" else "corte"
-                ax.set(xlabel="Época", ylabel=metric, title=f"{metric} por {label}", ylim=(0, 1))
-                ax.set_xticks(history.epoch)
-                ax.legend()
-                fig.tight_layout()
-                fig.savefig(output_dir / f"{metric}_curve_{level}.png", dpi=150)
-                plt.close(fig)
-        if "learning_rate" in history:
-            fig, ax = plt.subplots(figsize=(7, 4))
-            ax.plot(history.epoch, history.learning_rate, marker="o")
-            ax.set(xlabel="Época", ylabel="Learning rate", yscale="log")
-            ax.set_xticks(history.epoch)
-            fig.tight_layout()
-            fig.savefig(output_dir / "learning_rate_curve.png", dpi=150)
-            plt.close(fig)

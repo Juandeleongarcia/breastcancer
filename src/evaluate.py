@@ -11,6 +11,7 @@ from src.dataset import BreastDCEDataset
 from src.model import BreastCancerCNN
 from src.experiment import select_device, create_criterion, validate, select_patients
 from src.metrics import save_evaluation_artifacts
+from src.run_layout import run_root, technical_file
 
 
 def evaluate_checkpoint(path, output_dir=None, legacy_config=None, csv_path=None):
@@ -18,7 +19,7 @@ def evaluate_checkpoint(path, output_dir=None, legacy_config=None, csv_path=None
     checkpoint = torch.load(path, map_location="cpu", weights_only=True)
     raw_config = checkpoint.get("config")
     if raw_config is None:
-        candidates = [path.parent / "config.json", path.parent / "details" / "config.json",
+        candidates = [technical_file(run_root(path), "config.json"), path.parent / "config.json", path.parent / "details" / "config.json",
                       path.parent.parent / "details" / "config.json"]
         snapshot = next((p for p in candidates if p.exists()), candidates[0])
         if legacy_config:

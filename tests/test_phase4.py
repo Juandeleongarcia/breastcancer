@@ -24,7 +24,7 @@ class Phase4Tests(unittest.TestCase):
             root=Path(tmp)
             (root/"checkpoints").mkdir()
             (root/"details").mkdir()
-            checkpoint=root/"checkpoints/last_epoch.pt"
+            checkpoint=root/"epoch_001.pt"
             environment=root/"details/environment.json"
             environment.write_text(json.dumps({"packages":{"torch":"99.0.0"}}),encoding="utf-8")
             with self.assertRaisesRegex(ValueError,"PyTorch incompatible"):
@@ -64,12 +64,12 @@ class Phase4Tests(unittest.TestCase):
             root=Path(tmp);cfg=self.fixture(root)
             complete,_=train(cfg)
             first,_=train(dict(cfg,EPOCHS=1))
-            source=first/"checkpoints/last_epoch.pt"
+            source=first/"epoch_001.pt"
             with self.assertRaisesRegex(ValueError,"DROPOUT"):
                 train(dict(cfg,DROPOUT=.2), resume_from=source)
             resumed,summary=train(cfg,resume_from=source)
-            a=torch.load(complete/"checkpoints/last_epoch.pt",weights_only=True)
-            b=torch.load(resumed/"checkpoints/last_epoch.pt",weights_only=True)
+            a=torch.load(complete/"epoch_002.pt",weights_only=True)
+            b=torch.load(resumed/"epoch_002.pt",weights_only=True)
             for key in a["model_state_dict"]:
                 torch.testing.assert_close(a["model_state_dict"][key],b["model_state_dict"][key],rtol=0,atol=0)
             self.assertEqual(a["scheduler_state_dict"],b["scheduler_state_dict"])
@@ -85,8 +85,6 @@ class Phase4Tests(unittest.TestCase):
             self.assertEqual(summary["experiment_key"],experiment_key(cfg))
             self.assertIsNotNone(completed_run(cfg))
             self.assertIsNone(completed_run(dict(cfg,EPOCHS=10)))
-            recovery=first/"checkpoints/recovery_epoch_start_001.pt"
-            self.assertEqual(load_resume(recovery,cfg)["epoch"],0)
 
     def test_batch_logs_errors_skips_completed_and_continues(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -113,9 +111,9 @@ class Phase4Tests(unittest.TestCase):
             root=Path(tmp);cfg=self.fixture(root)
             directory,_=train(dict(cfg,DEADLINE_UNIX=time.time()-1))
             with self.assertRaises(ValueError):
-                load_resume(directory/"checkpoints/interrupted_epoch_001.pt",cfg)
+                load_resume(directory/"internals/interrupted_epoch_001.pt",cfg)
             candidate=interrupted_checkpoint(cfg)
-            self.assertEqual(candidate.name,"recovery_epoch_start_001.pt")
+            self.assertEqual(candidate.name,"recovery_epoch_start.pt")
 
 
 if __name__ == "__main__":

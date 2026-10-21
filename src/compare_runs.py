@@ -7,18 +7,19 @@ from uuid import uuid4
 import pandas as pd
 
 from src.configuration import project_path
+from src.run_layout import summary_paths, technical_file
 
 
 def comparison(root="models", phase3_session=None):
     rows = []
-    for path in sorted(project_path(root).glob("*/summary.json")):
+    for path in summary_paths(project_path(root)):
         summary = json.loads(path.read_text(encoding="utf-8"))
         if "validation" not in summary:
             continue  # Batch fijo: no es un experimento con validación.
         val = summary["validation"]
-        config_paths = [path.parent / "details" / "config.json", path.parent / "config.json"]
-        config_path = next((p for p in config_paths if p.exists()), None)
-        cfg = json.loads(config_path.read_text(encoding="utf-8")) if config_path else {}
+        directory = path.parent.parent if path.parent.name == "internals" else path.parent
+        config_path = technical_file(directory, "config.json")
+        cfg = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
         rows.append(dict(Run=summary["run"], Experimento=summary["experiment"],
                          Referencia=summary.get('comparison_parent',cfg.get('COMPARISON_PARENT')),
                          CNN=str(summary["cnn"]), Loss="ponderada" if summary["weighted_loss"] else "normal",

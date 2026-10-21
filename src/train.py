@@ -1,7 +1,8 @@
 """Entrada histórica del entrenamiento; lógica compartida en src.experiment.
 
 Se conservan los helpers públicos y el formato de checkpoints por época.
-Los nuevos runs añaden configuración completa y selección por AUC de paciente.
+Los nuevos runs guardan config.py, history.csv, checkpoints y cuatro curvas en
+la raíz; los archivos técnicos se concentran en internals/. Selección por paciente.
 """
 import shutil
 from pathlib import Path

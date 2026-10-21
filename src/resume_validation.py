@@ -4,13 +4,14 @@ from pathlib import Path
 import re
 
 import torch
+from src.run_layout import run_root, technical_file
 
 
 def validate_resume_environment(checkpoint):
     checkpoint = Path(checkpoint)
-    environment = checkpoint.parent.parent / "details" / "environment.json"
+    environment = technical_file(run_root(checkpoint), "environment.json")
     if not environment.exists():
-        raise ValueError("Para reanudar, conservar también details/environment.json junto al run de origen")
+        raise ValueError("Para reanudar, conservar también internals/environment.json (o details/environment.json histórico) junto al run de origen")
     saved = json.loads(environment.read_text(encoding="utf-8"))["packages"]["torch"]
     family = lambda version: tuple(re.match(r"(\d+)\.(\d+)", str(version)).groups())
     if family(saved) != family(torch.__version__):

@@ -72,9 +72,9 @@ class Phase5Tests(unittest.TestCase):
                 Image.fromarray(image).save(root/f'{phase}.png')
             cfg.update(USE_AUGMENTATION=True,AUGMENTATION_MODE='gentle_affine',AUGMENT_PROBABILITY=1)
             whole,_=train(cfg);first,_=train(dict(cfg,EPOCHS=1))
-            continued,_=train(cfg,resume_from=first/'checkpoints/last_epoch.pt')
-            a=torch.load(whole/'checkpoints/last_epoch.pt',weights_only=True)
-            b=torch.load(continued/'checkpoints/last_epoch.pt',weights_only=True)
+            continued,_=train(cfg,resume_from=first/'epoch_001.pt')
+            a=torch.load(whole/'epoch_002.pt',weights_only=True)
+            b=torch.load(continued/'epoch_002.pt',weights_only=True)
             for key in a['model_state_dict']:
                 torch.testing.assert_close(a['model_state_dict'][key],b['model_state_dict'][key],atol=0,rtol=0)
             torch.testing.assert_close(a['rng_state']['torch'],b['rng_state']['torch'],atol=0,rtol=0)
