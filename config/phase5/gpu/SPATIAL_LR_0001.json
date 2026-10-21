@@ -1,0 +1,98 @@
+{
+  "TRAIN_CSV": "metadata/internal_train.csv",
+  "VAL_CSV": "metadata/internal_val.csv",
+  "DATA_DIR": "breastdcedl",
+  "IMAGE_SIZE": 256,
+  "INPUT_CHANNELS": 3,
+  "BATCH_SIZE": 16,
+  "NUM_WORKERS": 0,
+  "INPUT_MODE": "enhancement",
+  "USE_CLIPPING": true,
+  "CHANNEL_P01": [
+    0.0,
+    -0.109803915,
+    -0.1058823615
+  ],
+  "CHANNEL_P99": [
+    0.6705882549,
+    0.6509803534,
+    0.6235294342
+  ],
+  "USE_STANDARDIZATION": true,
+  "CHANNEL_MEANS": [
+    0.1263833838,
+    0.0676578613,
+    0.0782202765
+  ],
+  "CHANNEL_STDS": [
+    0.1545330693,
+    0.1365353164,
+    0.1387470868
+  ],
+  "CONV_CHANNELS": [
+    32,
+    64,
+    128
+  ],
+  "KERNEL_SIZE": 3,
+  "PADDING": 1,
+  "POOL_SIZE": 2,
+  "USE_BATCH_NORM": true,
+  "DROPOUT": 0.4,
+  "NUM_CLASSES": 1,
+  "EPOCHS": 10,
+  "LEARNING_RATE": 0.0001,
+  "WEIGHT_DECAY": 0.0005,
+  "OPTIMIZER": "adamw",
+  "USE_WEIGHTED_LOSS": false,
+  "CLASSIFICATION_THRESHOLD": 0.5,
+  "USE_EARLY_STOPPING": true,
+  "PATIENCE": 4,
+  "TARGET_ROC_AUC": 0.7,
+  "SEED": 42,
+  "USE_GPU": true,
+  "EARLY_STOPPING_PATIENCE": null,
+  "RANDOM_SEED": null,
+  "DEVICE": "cuda",
+  "TORCH_NUM_THREADS": 4,
+  "USE_AUGMENTATION": false,
+  "SMOKE_TEST": false,
+  "SMOKE_PATIENTS_PER_CLASS": 2,
+  "MAX_TRAIN_BATCHES": null,
+  "MAX_VAL_BATCHES": null,
+  "RUN_NAME": "SPATIAL_LR_0001",
+  "RESULTS_DIR": "models",
+  "SAVE_EVERY": 1,
+  "PRIMARY_METRIC": "patient_auc",
+  "STATS_PATH": "models/stats_baseline_clase.json",
+  "STATS_PROVENANCE": "requires_fit",
+  "STATS_PREPROCESSING": {
+    "INPUT_MODE": "enhancement",
+    "USE_CLIPPING": true,
+    "CHANNEL_P01": [
+      0.0,
+      -0.109803915,
+      -0.1058823615
+    ],
+    "CHANNEL_P99": [
+      0.6705882549,
+      0.6509803534,
+      0.6235294342
+    ]
+  },
+  "CONVS_PER_BLOCK": 2,
+  "SCHEDULER": "plateau",
+  "SCHEDULER_FACTOR": 0.5,
+  "SCHEDULER_PATIENCE": 2,
+  "SCHEDULER_MIN_LR": 1e-06,
+  "AUGMENTATION_MODE": "legacy_flips",
+  "AUGMENT_PROBABILITY": 0.8,
+  "AUGMENT_DEGREES": 5.0,
+  "AUGMENT_TRANSLATE": 0.02,
+  "AUGMENT_SCALE_DELTA": 0.02,
+  "TRAIN_PATIENTS_PER_CLASS": null,
+  "COMPARISON_PARENT": "F4_NO_WEIGHT_PC",
+  "INTERPRETATION": "exploratorio_gpu_hasta_diez_epocas_semilla_unica",
+  "EXPECTED_TRAIN_PATIENTS": 877,
+  "EXPECTED_VAL_PATIENTS": 220
+}

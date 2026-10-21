@@ -64,7 +64,7 @@
   "RESULTS_DIR": "models",
   "SAVE_EVERY": 1,
   "PRIMARY_METRIC": "patient_auc",
-  "STATS_PATH": "config/phase3/stats/baseline_clipped.json",
+  "STATS_PATH": "models/stats_baseline_clase.json",
   "STATS_PROVENANCE": "requires_fit",
   "STATS_PREPROCESSING": {
     "INPUT_MODE": "enhancement",
