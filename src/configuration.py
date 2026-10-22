@@ -18,6 +18,18 @@ def file_hash(path):
     return hashlib.sha256(project_path(path).read_bytes()).hexdigest()
 
 
+def canonical_csv_hash(path):
+    """Identidad portable de partición: solo CRLF→LF, sin reordenar filas ni campos."""
+    return hashlib.sha256(project_path(path).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
+def csv_hash_variants(path):
+    """Hashes exactos aceptables para una misma partición en Windows/Linux."""
+    raw = project_path(path).read_bytes()
+    lf = raw.replace(b"\r\n", b"\n")
+    return {hashlib.sha256(data).hexdigest() for data in [raw, lf, lf.replace(b"\n", b"\r\n")]}
+
+
 def resolve_config(config=None):
     values = {k: v for k, v in vars(defaults).items() if k.isupper()}
     if config is not None:
@@ -30,6 +42,8 @@ def resolve_config(config=None):
         raise ValueError("La selección principal debe usar patient_auc")
     if values["INPUT_CHANNELS"] != 3 or not values["CONV_CHANNELS"]:
         raise ValueError("Se requieren tres fases y al menos un bloque")
+    if values["SPATIAL_GRID"] not in [1, 2]:
+        raise ValueError("SPATIAL_GRID debe ser 1 (histórico) o 2 (regional)")
     if values["CONVS_PER_BLOCK"] not in [1, 2]:
         raise ValueError("CONVS_PER_BLOCK debe ser 1 (baseline) o 2 (espacial)")
     if values["SCHEDULER"] not in ["none", "plateau"]:
@@ -82,7 +96,7 @@ def apply_statistics(cfg, path):
     if stats["diagnostic_partial"]:
         raise ValueError("No se admiten estadísticas parciales para normalizar runs")
     expected = {k: cfg[k] for k in ["INPUT_MODE", "USE_CLIPPING", "CHANNEL_P01", "CHANNEL_P99"]}
-    if stats["preprocessing"] != expected or stats["train_csv_sha256"] != file_hash(cfg["TRAIN_CSV"]):
+    if stats["preprocessing"] != expected or stats["train_csv_sha256"] not in csv_hash_variants(cfg["TRAIN_CSV"]):
         raise ValueError("Las estadísticas no corresponden al train o preprocesamiento")
     cfg.update(CHANNEL_MEANS=stats["means"], CHANNEL_STDS=stats["stds"],
                STATS_PATH=str(path), STATS_PROVENANCE="verified_train_fit",

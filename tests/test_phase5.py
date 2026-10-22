@@ -30,7 +30,8 @@ class Phase5Tests(unittest.TestCase):
             batch=next((root/'batches').glob('BATCH_*'))
             self.assertEqual(json.loads((batch/'results.json').read_text())[0]['status'],'pendiente_por_presupuesto')
             self.assertTrue((batch/'comparison.csv').exists())
-            self.assertEqual(len(pd.read_csv(batch/'comparison.csv')),0)
+            self.assertEqual(len(pd.read_csv(batch/'comparison.csv')),1)
+            self.assertEqual(pd.read_csv(batch/'comparison.csv').Estado.iloc[0],'pendiente_por_presupuesto')
 
     def test_affine_preserves_phase_relations_and_rng(self):
         cfg=resolve_config(dict(AUGMENT_PROBABILITY=1,AUGMENTATION_MODE='gentle_affine'))

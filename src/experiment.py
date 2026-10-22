@@ -74,6 +74,8 @@ def environment_info(device):
     status = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True)
     return dict(python=platform.python_version(), platform=platform.platform(), packages=versions,
                 device=str(device), cuda_available=torch.cuda.is_available(), cuda_build=torch.version.cuda,
+                hip_build=getattr(torch.version, "hip", None),
+                backend=("rocm" if getattr(torch.version, "hip", None) else "cuda" if torch.version.cuda else "cpu"),
                 gpu_name=torch.cuda.get_device_name(device) if device.type == "cuda" else None,
                 git_commit=git.stdout.strip(), git_dirty=bool(status.stdout.strip()))
 

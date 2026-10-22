@@ -1,4 +1,5 @@
 """Reanudación en límites de época; serialización restringida y ramas inmutables."""
+from itertools import product
 import hashlib
 import json
 import os
@@ -9,10 +10,10 @@ from uuid import uuid4
 import numpy as np
 import torch
 
-from src.configuration import file_hash, project_path
+from src.configuration import file_hash, project_path, canonical_csv_hash, csv_hash_variants
 
 COMPATIBILITY_KEYS = [
-    "INPUT_CHANNELS", "CONV_CHANNELS", "CONVS_PER_BLOCK", "KERNEL_SIZE", "PADDING", "POOL_SIZE",
+    "SPATIAL_GRID", "INPUT_CHANNELS", "CONV_CHANNELS", "CONVS_PER_BLOCK", "KERNEL_SIZE", "PADDING", "POOL_SIZE",
     "USE_BATCH_NORM", "DROPOUT", "IMAGE_SIZE", "INPUT_MODE", "USE_CLIPPING", "CHANNEL_P01", "CHANNEL_P99",
     "USE_STANDARDIZATION", "CHANNEL_MEANS", "CHANNEL_STDS", "USE_AUGMENTATION", "BATCH_SIZE", "SEED",
     "OPTIMIZER", "LEARNING_RATE", "WEIGHT_DECAY", "USE_WEIGHTED_LOSS", "CLASSIFICATION_THRESHOLD",
@@ -26,7 +27,7 @@ COMPATIBILITY_KEYS = [
 def contract(cfg):
     result = {key: cfg[key] for key in COMPATIBILITY_KEYS}
     result["TRAIN_PATIENTS_PER_CLASS"] = cfg.get("TRAIN_PATIENTS_PER_CLASS")
-    result["csv_sha256"] = {"train": file_hash(cfg["TRAIN_CSV"]), "validation": file_hash(cfg["VAL_CSV"])}
+    result["csv_sha256"] = {"train": canonical_csv_hash(cfg["TRAIN_CSV"]), "validation": canonical_csv_hash(cfg["VAL_CSV"])}
     sources = ["src/model.py", "src/dataset.py", "src/experiment.py", "src/checkpointing.py", "src/metrics.py", "src/configuration.py", "src/augmentation.py", "src/run_layout.py"]
     result["source_sha256"] = {name: hashlib.sha256(project_path(name).read_text(encoding="utf-8-sig").replace("\r\n", "\n").encode()).hexdigest() for name in sources}
     return result
@@ -38,16 +39,25 @@ def experiment_key(cfg):
 
 
 def compatible_experiment_keys(cfg):
-    """Omitir también completados del único formato anterior auditado."""
+    """Mantener omisión de históricos solo para las fuentes auditadas y grid 1."""
     keys = {experiment_key(cfg)}
     migration_path = project_path("src/layout_compatibility.json")
     if migration_path.is_file():
         migration = json.loads(migration_path.read_text(encoding="utf-8"))
         current = contract(cfg)
         if current["source_sha256"] == migration["simple_layout_sources"]:
-            current["source_sha256"] = migration["previous_sources"]
-            payload = dict(current, requested_epochs=cfg["EPOCHS"])
-            keys.add(hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest())
+            prior = [dict(sources=sources, has_spatial_grid=False) for sources in
+                     [migration["previous_sources"], *migration.get("compatible_source_sets", [])]]
+            for entry in prior + migration.get("compatible_contracts", []):
+                if not entry["has_spatial_grid"] and cfg["SPATIAL_GRID"] != 1:
+                    continue
+                legacy = dict(current, source_sha256=entry["sources"])
+                if not entry["has_spatial_grid"]:
+                    legacy.pop("SPATIAL_GRID")
+                for train_sha, val_sha in product(csv_hash_variants(cfg["TRAIN_CSV"]), csv_hash_variants(cfg["VAL_CSV"])):
+                    payload = dict(legacy, requested_epochs=cfg["EPOCHS"],
+                                   csv_sha256={"train": train_sha, "validation": val_sha})
+                    keys.add(hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest())
     return keys
 
 
@@ -85,15 +95,22 @@ def load_resume(path, cfg):
     if checkpoint.get("epoch_incomplete"):
         raise ValueError("Los pesos de media época son diagnósticos; reanudar desde recovery_epoch_start")
     expected = contract(cfg)
-    saved = checkpoint["training_contract"]
+    saved = dict(checkpoint["training_contract"])
+    saved.setdefault("SPATIAL_GRID", 1)  # Ausencia histórica = pooling 1x1.
     differences = [key for key in expected if expected[key] != saved.get(key)]
+    if "csv_sha256" in differences:
+        hashes = saved.get("csv_sha256", {})
+        if (set(hashes) == {"train", "validation"}
+                and hashes["train"] in csv_hash_variants(cfg["TRAIN_CSV"])
+                and hashes["validation"] in csv_hash_variants(cfg["VAL_CSV"])):
+            differences.remove("csv_sha256")
     if "source_sha256" in differences:
         # Migración acotada: solo la pareja EXACTA de fuentes auditadas de este cambio.
         # CSV, arquitectura, configuración, optimizador y scheduler siguen verificándose.
         migration_path = project_path("src/layout_compatibility.json")
         if migration_path.is_file():
             migration = json.loads(migration_path.read_text(encoding="utf-8"))
-            if (saved.get("source_sha256") == migration["previous_sources"]
+            if (saved.get("source_sha256") in [migration["previous_sources"], *migration.get("compatible_source_sets", []), *[entry["sources"] for entry in migration.get("compatible_contracts", [])]]
                     and expected["source_sha256"] == migration["simple_layout_sources"]):
                 differences.remove("source_sha256")
     if differences:

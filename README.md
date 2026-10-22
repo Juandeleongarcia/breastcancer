@@ -222,3 +222,7 @@ Guía actual para el ordenador GPU, sin reinstalar PyTorch: [documentation/GPU_F
 python -m src.batch_train --check-device cuda
 python -m src.batch_train --suite config/phase5/gpu_suite.json --only BASE_UNWEIGHT SPATIAL_UNWEIGHT AUG_UNWEIGHT --device cuda --resume-interrupted
 ```
+
+## Fase 6: GPU AMD / ROCm en Linux
+
+Guía de la batería de cinco modelos, veinte épocas, preflight y reanudación: [GPU_FASE6.md](GPU_FASE6.md). Las imágenes y checkpoints son locales; no se incluyen en Git.

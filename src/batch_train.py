@@ -33,6 +33,8 @@ def check_device(requested):
         torch.cuda.synchronize()
     info = dict(python=sys.executable, torch=str(torch.__version__), cuda_build=torch.version.cuda,
                 cuda_available=torch.cuda.is_available(), actual_device=str(device),
+                hip_build=getattr(torch.version, "hip", None),
+                backend=("rocm" if getattr(torch.version, "hip", None) else "cuda" if torch.version.cuda else "cpu"),
                 gpu=torch.cuda.get_device_name(0) if device.type == "cuda" else None,
                 gpu_memory_bytes=torch.cuda.get_device_properties(0).total_memory if device.type == "cuda" else None,
                 forward_backward_passed=True)
@@ -104,6 +106,8 @@ def main():
     if args.max_minutes is not None and args.max_minutes <= 0:
         parser.error("--max-minutes debe ser positivo")
     suite = load_config(args.suite)
+    if suite.get("required_backend") == "rocm" and (not getattr(torch.version, "hip", None) or not torch.cuda.is_available() or args.device == "cpu"):
+        raise RuntimeError("Esta batería exige GPU AMD con PyTorch ROCm; no se permite entrenamiento CPU/CUDA NVIDIA")
     entries = suite["experiments"]
     if args.only:
         if set(args.only)-{x["id"] for x in entries}:
@@ -120,8 +124,18 @@ def main():
     def save_results():
         (directory/"results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
         frame = pd.concat([comparison(root) for root in result_roots], ignore_index=True)
-        run_names = {Path(item["run"]).name for item in results if item.get("run")}
-        frame[frame.Run.isin(run_names)].drop_duplicates("Run").to_csv(directory/"comparison.csv", index=False)
+        rows = []
+        for entry in entries:
+            item = next((r for r in reversed(results) if r["id"] == entry["id"]), {})
+            matching = frame[frame.Run.eq(Path(item["run"]).name)] if item.get("run") else pd.DataFrame()
+            row = matching.iloc[0].to_dict() if not matching.empty else {}
+            row.update(ID_suite=entry["id"], Estado_ejecucion=item.get("status", "pendiente"))
+            if not matching.empty:
+                row["Estado_modelo"] = row.get("Estado")
+            row["Estado"] = item.get("status", "pendiente")
+            rows.append(row)
+        pd.DataFrame(rows).to_csv(directory/"comparison.csv", index=False)
+    save_results()
     for entry in entries:
         if deadline and time.time() >= deadline-30:
             results.append(dict(id=entry["id"], status="pendiente_por_presupuesto"))

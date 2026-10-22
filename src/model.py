@@ -36,9 +36,9 @@ class BreastCancerCNN(nn.Module):
 
             in_channels = out_channels
 
-        # Reduce cada mapa de características a 1x1
+        # 1x1 conserva el baseline; 2x2 retiene cuatro regiones para la variante Fase 6.
         layers.append(
-            nn.AdaptiveAvgPool2d((1, 1))
+            nn.AdaptiveAvgPool2d((cfg["SPATIAL_GRID"], cfg["SPATIAL_GRID"]))
         )
 
         self.features = nn.Sequential(*layers)
@@ -48,7 +48,7 @@ class BreastCancerCNN(nn.Module):
             nn.Flatten(),
             nn.Dropout(cfg["DROPOUT"]),
             nn.Linear(
-                cfg["CONV_CHANNELS"][-1],
+                cfg["CONV_CHANNELS"][-1] * cfg["SPATIAL_GRID"] ** 2,
                 1
             ),
         )

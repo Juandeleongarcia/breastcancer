@@ -9,13 +9,40 @@
     "src/augmentation.py": "3807698920b0832604c1e2160631602f3aca4e340274bffde6a16f9388c46fbf"
   },
   "simple_layout_sources": {
-    "src/model.py": "dfb3b711cc0663268456982d311965b5704a6428df968f4a62f4aa049eb2e594",
+    "src/model.py": "fae79943cdb61caa56ead6070672d928f2e2d2bfb75f0a16ede23f3327a9f1d0",
     "src/dataset.py": "d773eb59d5a9b8642509ca2dfde5119714bdde0a79f73f3ecc093c50c7551379",
-    "src/experiment.py": "af2ab30400d83a3770308c700f6b4eb9f2b728c61385182cbb7df7691b821054",
-    "src/checkpointing.py": "34b0520a38a4a46c9e098b1d1e4e5855d881d4054f2b9dce4002b414723fab6c",
+    "src/experiment.py": "7014beb82d459b01b8ef861c3618397c180034a02677cb273748cc0fcb5d2719",
+    "src/checkpointing.py": "69b25c60070a59a4250349dd69f3aa7a303e0f2802b5acfbbfc683ed20e38355",
     "src/metrics.py": "bcbbf8bbf4bf53299ce435d508e489869035bf2d0bc861ae041928ee26e8dfcd",
-    "src/configuration.py": "fe4f2b8ab2fe7cb9f7b1d4b6d3b8ff807ce487d20c1e23e80d801a8d568efc0e",
+    "src/configuration.py": "06f29dbcde93c675b795685022191be33ed093ab681eb3ae1f49a57e5032a09a",
     "src/augmentation.py": "3807698920b0832604c1e2160631602f3aca4e340274bffde6a16f9388c46fbf",
     "src/run_layout.py": "f21c3bf2206a380f5c3e0140ddb8bf80c1e325cabaeb63bea378835ec39d8f47"
-  }
+  },
+  "compatible_source_sets": [
+    {
+      "src/model.py": "dfb3b711cc0663268456982d311965b5704a6428df968f4a62f4aa049eb2e594",
+      "src/dataset.py": "d773eb59d5a9b8642509ca2dfde5119714bdde0a79f73f3ecc093c50c7551379",
+      "src/experiment.py": "af2ab30400d83a3770308c700f6b4eb9f2b728c61385182cbb7df7691b821054",
+      "src/checkpointing.py": "34b0520a38a4a46c9e098b1d1e4e5855d881d4054f2b9dce4002b414723fab6c",
+      "src/metrics.py": "bcbbf8bbf4bf53299ce435d508e489869035bf2d0bc861ae041928ee26e8dfcd",
+      "src/configuration.py": "fe4f2b8ab2fe7cb9f7b1d4b6d3b8ff807ce487d20c1e23e80d801a8d568efc0e",
+      "src/augmentation.py": "3807698920b0832604c1e2160631602f3aca4e340274bffde6a16f9388c46fbf",
+      "src/run_layout.py": "f21c3bf2206a380f5c3e0140ddb8bf80c1e325cabaeb63bea378835ec39d8f47"
+    }
+  ],
+  "compatible_contracts": [
+    {
+      "sources": {
+        "src/model.py": "fae79943cdb61caa56ead6070672d928f2e2d2bfb75f0a16ede23f3327a9f1d0",
+        "src/dataset.py": "d773eb59d5a9b8642509ca2dfde5119714bdde0a79f73f3ecc093c50c7551379",
+        "src/experiment.py": "af2ab30400d83a3770308c700f6b4eb9f2b728c61385182cbb7df7691b821054",
+        "src/checkpointing.py": "82b7f045e5cd7d7bfc9d485845f194846f4cbefd7c5782e554af9c6ed51ccd51",
+        "src/metrics.py": "bcbbf8bbf4bf53299ce435d508e489869035bf2d0bc861ae041928ee26e8dfcd",
+        "src/configuration.py": "ca8d73baf6b673069db51f308a0efd1aa580eb7fd816ab6a4dffddd91e764dce",
+        "src/augmentation.py": "3807698920b0832604c1e2160631602f3aca4e340274bffde6a16f9388c46fbf",
+        "src/run_layout.py": "f21c3bf2206a380f5c3e0140ddb8bf80c1e325cabaeb63bea378835ec39d8f47"
+      },
+      "has_spatial_grid": true
+    }
+  ]
 }

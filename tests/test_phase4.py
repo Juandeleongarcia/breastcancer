@@ -103,7 +103,8 @@ class Phase4Tests(unittest.TestCase):
             results=json.loads((batch/"results.json").read_text())
             self.assertEqual([r["status"] for r in results],["error","entrenamiento_completo","omitido_completo"])
             self.assertTrue((batch/"errors.jsonl").exists())
-            self.assertEqual(len(pd.read_csv(batch/"comparison.csv")),1)
+            self.assertEqual(len(pd.read_csv(batch/"comparison.csv")),3)
+            self.assertEqual(pd.read_csv(batch/"comparison.csv").Estado.tolist(),["error","entrenamiento_completo","omitido_completo"])
 
     def test_interrupted_uses_boundary_not_partial_weights(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,0 +1,25 @@
+{
+  "experiments": [
+    {
+      "id": "BASE_SPATIAL",
+      "config": "config/phase6/rocm20/BASE_SPATIAL.json"
+    },
+    {
+      "id": "WEIGHT_DECAY",
+      "config": "config/phase6/rocm20/WEIGHT_DECAY.json"
+    },
+    {
+      "id": "REGIONAL_2X2",
+      "config": "config/phase6/rocm20/REGIONAL_2X2.json"
+    },
+    {
+      "id": "GENTLE_AUG",
+      "config": "config/phase6/rocm20/GENTLE_AUG.json"
+    },
+    {
+      "id": "DROPOUT_050",
+      "config": "config/phase6/rocm20/DROPOUT_050.json"
+    }
+  ],
+  "required_backend": "rocm"
+}

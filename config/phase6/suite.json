@@ -1,0 +1,24 @@
+{
+  "experiments": [
+    {
+      "id": "WEIGHT_DECAY",
+      "config": "config/phase6/WEIGHT_DECAY.json"
+    },
+    {
+      "id": "DROPOUT_050",
+      "config": "config/phase6/DROPOUT_050.json"
+    },
+    {
+      "id": "SCHEDULER_FAST",
+      "config": "config/phase6/SCHEDULER_FAST.json"
+    },
+    {
+      "id": "REGIONAL_2X2",
+      "config": "config/phase6/REGIONAL_2X2.json"
+    },
+    {
+      "id": "GENTLE_AUG",
+      "config": "config/phase6/GENTLE_AUG.json"
+    }
+  ]
+}

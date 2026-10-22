@@ -6,7 +6,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from src.configuration import resolve_config, load_config, project_path, file_hash
+from src.configuration import resolve_config, load_config, project_path, file_hash, csv_hash_variants
 from src.dataset import BreastDCEDataset
 from src.model import BreastCancerCNN
 from src.experiment import select_device, create_criterion, validate, select_patients
@@ -37,11 +37,12 @@ def evaluate_checkpoint(path, output_dir=None, legacy_config=None, csv_path=None
     # No dejar que una futura edición de defaults cambie su arquitectura al evaluarlos.
     raw_config = dict(raw_config)
     raw_config.setdefault("CONVS_PER_BLOCK", 1)
+    raw_config.setdefault("SPATIAL_GRID", 1)  # Los históricos siempre usaron pooling global 1x1.
     cfg = resolve_config(raw_config)
     cfg["DEADLINE_UNIX"] = None  # El presupuesto original no limita una reevaluación posterior.
     selected_csv = csv_path or cfg["VAL_CSV"]
     expected_hash = checkpoint.get("csv_sha256", {}).get("validation")
-    if csv_path is None and expected_hash and file_hash(selected_csv) != expected_hash:
+    if csv_path is None and expected_hash and expected_hash not in csv_hash_variants(selected_csv):
         raise ValueError("La partición de validación cambió desde el entrenamiento")
     frame = pd.read_csv(project_path(selected_csv))
     if "split" not in frame or not frame.split.eq("train").all():

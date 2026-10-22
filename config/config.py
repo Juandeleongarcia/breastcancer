@@ -235,3 +235,6 @@ AUGMENT_PROBABILITY = 0.8
 AUGMENT_DEGREES = 5.0
 AUGMENT_TRANSLATE = 0.02
 AUGMENT_SCALE_DELTA = 0.02
+
+# Fase 6: 1 conserva exactamente el pooling y clasificador históricos.
+SPATIAL_GRID = 1

@@ -1,0 +1,93 @@
+"""Preflight sin entrenamiento: particiones, estadísticas, archivos y CNN sintéticas."""
+import argparse
+import json
+from pathlib import PurePosixPath
+
+import pandas as pd
+import torch
+
+from src.batch_train import check_device, resolve_job
+from src.configuration import load_config, project_path, file_hash
+from src.model import BreastCancerCNN
+from src.experiment import select_device, set_seed
+
+
+def require_rocm():
+    if not getattr(torch.version, 'hip', None) or not torch.cuda.is_available():
+        raise RuntimeError('Se requiere PyTorch ROCm con GPU AMD accesible; no se permite fallback CPU/CUDA NVIDIA')
+
+
+def verify_suite(path='config/phase6/rocm20_suite.json', device='cpu', synthetic=True):
+    entries = load_config(path)['experiments']
+    configs = {e['id']: resolve_job(e['config'], device) for e in entries}
+    expected = {'BASE_SPATIAL': set(), 'WEIGHT_DECAY': {'WEIGHT_DECAY'},
+                'REGIONAL_2X2': {'SPATIAL_GRID'}, 'GENTLE_AUG': {'USE_AUGMENTATION', 'AUGMENTATION_MODE'},
+                'DROPOUT_050': {'DROPOUT'}}
+    if set(configs) != set(expected):
+        raise ValueError('La batería debe contener exactamente los cinco modelos acordados')
+    base = configs['BASE_SPATIAL']
+    train = pd.read_csv(project_path(base['TRAIN_CSV']))
+    val = pd.read_csv(project_path(base['VAL_CSV']))
+    if set(train.patient_id) & set(val.patient_id):
+        raise ValueError('Pacientes compartidos entre train y validación')
+    counts = {}
+    for name, frame, patients, slices, csv in [
+            ('train', train, 877, 8745, base['TRAIN_CSV']),
+            ('validation', val, 220, 2200, base['VAL_CSV'])]:
+        if (frame.patient_id.nunique() != patients or len(frame) != slices or frame.sample_id.duplicated().any()
+                or not frame.split.eq('train').all() or not frame.pCR.isin([0, 1]).all()
+                or not frame.groupby('patient_id').pCR.nunique().eq(1).all()):
+            raise ValueError('Partición interna inválida: '+name)
+        counts[name] = dict(patients=patients, slices=slices, sha256=file_hash(csv))
+        for column in ['path_pre', 'path_early', 'path_late']:
+            for relative in frame[column].unique():
+                relative = str(relative)
+                portable = PurePosixPath(relative)
+                if '\\' in relative or portable.is_absolute() or '..' in portable.parts:
+                    raise ValueError('Ruta no portable o fuera del dataset')
+                if not (project_path(base['DATA_DIR'])/relative).is_file():
+                    raise FileNotFoundError('Falta una imagen de train/validación: '+relative)
+    checks = []
+    for name, cfg in configs.items():
+        changed = {k for k in base if k not in {'RUN_NAME', 'COMPARISON_PARENT'} and cfg[k] != base[k]}
+        if changed != expected[name]:
+            raise ValueError(f'Diferencias no autorizadas en {name}: {changed}')
+        if (cfg['EPOCHS'] != 20 or cfg['PATIENCE'] != 5 or not cfg['USE_EARLY_STOPPING']
+                or cfg['PRIMARY_METRIC'] != 'patient_auc' or cfg['STATS_PROVENANCE'] != 'verified_train_fit'
+                or cfg['SMOKE_TEST'] or cfg['MAX_TRAIN_BATCHES'] or cfg['MAX_VAL_BATCHES']):
+            raise ValueError('Protocolo incompatible: '+name)
+        parameters = None
+        if synthetic:
+            set_seed(cfg['SEED'])
+            actual = select_device(cfg)
+            model = BreastCancerCNN(cfg).to(actual)
+            images = torch.randn(2, 3, cfg['IMAGE_SIZE'], cfg['IMAGE_SIZE'], device=actual)
+            labels = torch.tensor([0., 1.], device=actual)
+            logits = model(images).squeeze(1)
+            torch.nn.functional.binary_cross_entropy_with_logits(logits, labels).backward()
+            if logits.shape != (2,) or not torch.isfinite(logits).all() or not all(
+                    p.grad is not None and torch.isfinite(p.grad).all() for p in model.parameters()):
+                raise RuntimeError('Forward/backward no finito: '+name)
+            parameters = sum(p.numel() for p in model.parameters())
+            del model, images, logits
+        checks.append(dict(id=name, changes=sorted(changed), parameters=parameters, passed=True))
+    return dict(partitions=counts, models=checks, synthetic_only=True,
+                hip_build=getattr(torch.version, 'hip', None), clinical_training_performed=False)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--suite', default='config/phase6/rocm20_suite.json')
+    parser.add_argument('--device', choices=['cpu', 'cuda'], default='cpu')
+    parser.add_argument('--require-rocm', action='store_true')
+    args = parser.parse_args()
+    if args.require_rocm:
+        if args.device != 'cuda':
+            parser.error('--require-rocm requiere --device cuda (también en AMD)')
+        require_rocm()
+    check_device(args.device)
+    print(json.dumps(verify_suite(args.suite, args.device), indent=2))
+
+
+if __name__ == '__main__':
+    main()

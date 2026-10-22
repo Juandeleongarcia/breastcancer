@@ -1,0 +1,58 @@
+{
+  "historical_reference": {
+    "auc_patient": 0.636,
+    "epoch": 2,
+    "source": "user_report_not_locally_verified",
+    "dropout": 0.4,
+    "learning_rate": 0.0005
+  },
+  "common_protocol_change": {
+    "PATIENCE": {
+      "previous_phase5": 4,
+      "phase6": 5
+    }
+  },
+  "experiments": [
+    {
+      "id": "WEIGHT_DECAY",
+      "primary_change": {
+        "WEIGHT_DECAY": 0.002
+      },
+      "reason": "Penalizaci\u00f3n AdamW 4x; mantener dropout y LR.",
+      "reference": "config/phase6/reference.json"
+    },
+    {
+      "id": "DROPOUT_050",
+      "primary_change": {
+        "DROPOUT": 0.5
+      },
+      "reason": "Mayor regularizaci\u00f3n del clasificador; no repetir dropout .20.",
+      "reference": "config/phase6/reference.json"
+    },
+    {
+      "id": "SCHEDULER_FAST",
+      "primary_change": {
+        "SCHEDULER_PATIENCE": 0
+      },
+      "reason": "Reducir LR tras la primera \u00e9poca sin mejora de AUC, antes del early stopping.",
+      "reference": "config/phase6/reference.json"
+    },
+    {
+      "id": "REGIONAL_2X2",
+      "primary_change": {
+        "SPATIAL_GRID": 2
+      },
+      "reason": "Mantener cuatro regiones en vez del promedio global; mismas convoluciones.",
+      "reference": "config/phase6/reference.json"
+    },
+    {
+      "id": "GENTLE_AUG",
+      "primary_change": {
+        "USE_AUGMENTATION": true,
+        "AUGMENTATION_MODE": "gentle_affine"
+      },
+      "reason": "Pol\u00edtica geom\u00e9trica sincronizada como \u00fanica intervenci\u00f3n; sin cambios fotom\u00e9tricos.",
+      "reference": "config/phase6/reference.json"
+    }
+  ]
+}

@@ -20,7 +20,11 @@ def comparison(root="models", phase3_session=None):
         directory = path.parent.parent if path.parent.name == "internals" else path.parent
         config_path = technical_file(directory, "config.json")
         cfg = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
-        rows.append(dict(Run=summary["run"], Experimento=summary["experiment"],
+        history_path = directory / "history.csv"
+        history = pd.read_csv(history_path) if history_path.exists() else pd.DataFrame()
+        best = history[history.epoch.eq(summary["best_epoch"])] if "epoch" in history else pd.DataFrame()
+        train_loss = float(best.iloc[0].train_loss) if not best.empty and "train_loss" in best else None
+        rows.append(dict(Train_loss_online_mejor_epoca=train_loss, Run=summary["run"], Experimento=summary["experiment"],
                          Referencia=summary.get('comparison_parent',cfg.get('COMPARISON_PARENT')),
                          CNN=str(summary["cnn"]), Loss="ponderada" if summary["weighted_loss"] else "normal",
                          Clipping=summary["clipping"], Epocas=summary["epochs_completed"],
@@ -37,6 +41,7 @@ def comparison(root="models", phase3_session=None):
                          Representacion=cfg.get("INPUT_MODE"), Normalizacion=cfg.get("USE_STANDARDIZATION"),
                          Train_pacientes=summary.get("train_patients"), Val_pacientes=summary.get("validation_patients"),
                          Grupo_comparable="preliminar" if summary["diagnostic_partial"] else "train_completo",
+                         Spatial_grid=cfg.get("SPATIAL_GRID",1), Weight_decay=cfg.get("WEIGHT_DECAY"),
                          Val_loss=val["loss"], Tiempo_s=summary["seconds"], Estado=summary["status"]))
     for name in "ABCD" if phase3_session is None else []:
         if not any(row["Experimento"] == name and row["Estado"] == "entrenamiento_completo" for row in rows):
