@@ -1,5 +1,6 @@
 """Ejecución incremental de la CNN existente y registro de ambos niveles."""
 import argparse
+from copy import copy
 from datetime import datetime
 import importlib.metadata
 import json
@@ -163,6 +164,32 @@ def validate(model, loader, criterion, device, config=None):
     return result
 
 
+def evaluate_train(model, dataset, criterion, device, cfg, generator):
+    """Todo train, pesos finales, misma BCE/agregación que validación, sin augmentation.
+
+    Un dataset separado evita cambiar el utilizado por workers de entrenamiento.
+    Restaurar RNG y modo evita que esta observación altere la siguiente época.
+    """
+    deterministic = copy(dataset)
+    deterministic.df = dataset.df.copy()
+    deterministic.augment = False
+    loader = DataLoader(deterministic, batch_size=cfg["BATCH_SIZE"], shuffle=False,
+                        num_workers=cfg["NUM_WORKERS"], pin_memory=device.type == "cuda",
+                        generator=torch.Generator().manual_seed(cfg["SEED"]))
+    state, was_training = capture_rng(generator), model.training
+    try:
+        with torch.inference_mode():
+            result = run_epoch(model, loader, criterion, device,
+                               threshold=cfg["CLASSIFICATION_THRESHOLD"], deadline=cfg.get("DEADLINE_UNIX"))
+        if result["diagnostic_partial"]:
+            raise ValueError("Train eval debe evaluar todos los cortes seleccionados")
+        result["diagnostic_partial"] = bool(cfg.get("DIAGNOSTIC_PARTIAL", False))
+        return result
+    finally:
+        restore_rng(state, generator, device)
+        model.train(was_training)
+
+
 def select_patients(frame, n_per_class, seed):
     labels = frame[["patient_id", "pCR"]].drop_duplicates().sort_values("patient_id")
     ids = []
@@ -222,7 +249,7 @@ def train(config=None, resume_from=None):
     checkpoints = directory
     cfg["DIAGNOSTIC_PARTIAL"] = bool(cfg["SMOKE_TEST"] or cfg["MAX_TRAIN_BATCHES"] or cfg["MAX_VAL_BATCHES"] or cfg.get("TRAIN_PATIENTS_PER_CLASS"))
     (details / "config.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    (directory / "config.py").write_text("# Snapshot exacto; no modifica config/config.py\n# Train online: pesos cambiantes, dropout/augmentation según configuración.\n# Validación: pesos fijos al final de época, modo eval, sin augmentation.\n" +
+    (directory / "config.py").write_text("# Snapshot exacto; no modifica config/config.py\n# Train online: pesos cambiantes, dropout/augmentation según configuración.\n# Train eval (si EVALUATE_TRAIN=True) y validación: pesos finales, eval, sin augmentation.\n" +
         "\n".join(f"{key} = {value!r}" for key, value in cfg.items()), encoding="utf-8")
     env = environment_info(device)
     (details / "environment.json").write_text(json.dumps(env, indent=2), encoding="utf-8")
@@ -250,7 +277,7 @@ def train(config=None, resume_from=None):
     history, best, best_epoch, waiting = [], -math.inf, 0, 0
     best_result, best_weights = None, None
     start_epoch, prior_seconds = 1, 0.0
-    last_tr, last_va = None, None
+    last_tr, last_va, last_train_eval = None, None, None
     if resume_payload:
         model.load_state_dict(resume_payload["model_state_dict"])
         if scheduler:
@@ -263,6 +290,7 @@ def train(config=None, resume_from=None):
         prior_seconds = resume_payload["elapsed_training_seconds"]
         best_weights = resume_payload["best_model_state_dict"]
         last_tr, last_va = resume_payload["train_metrics"], resume_payload["val_metrics"]
+        last_train_eval = resume_payload.get("train_eval_metrics")
         if best_weights is not None:
             best_result = evaluate_predictions(resume_payload["best_slice_predictions"], cfg["CLASSIFICATION_THRESHOLD"])
             best_result.update(loss=resume_payload["best_validation_loss"], diagnostic_partial=cfg["DIAGNOSTIC_PARTIAL"])
@@ -300,6 +328,7 @@ def train(config=None, resume_from=None):
                     config=cfg, device=str(device), epoch=epoch, model_state_dict=model.state_dict(),
                     optimizer_state_dict=optimizer.state_dict(), scheduler_state_dict=scheduler.state_dict() if scheduler else None,
                     pos_weight=weight, train_metrics=last_tr, val_metrics=last_va,
+                    train_eval_metrics=last_train_eval,
                     best_epoch=best_epoch, best_patient_auc=best, epochs_without_improvement=waiting,
                     training_contract=contract(cfg), history=list(history), csv_sha256=hashes,
                     rng_state=capture_rng(generator), elapsed_training_seconds=prior_seconds+time.perf_counter()-start,
@@ -314,6 +343,9 @@ def train(config=None, resume_from=None):
         atomic_save(snapshot(epoch-1), recovery)
         try:
             tr = run_epoch(model, train_loader, criterion, device, optimizer, cfg["MAX_TRAIN_BATCHES"], cfg["CLASSIFICATION_THRESHOLD"], cfg.get("DEADLINE_UNIX"))
+            eval_start = time.perf_counter()
+            te = evaluate_train(model, train_ds, criterion, device, cfg, generator) if cfg["EVALUATE_TRAIN"] else None
+            eval_seconds = time.perf_counter() - eval_start
             va = validate(model, val_loader, criterion, device, cfg)
         except (TrainingBudgetExceeded, KeyboardInterrupt) as error:
             budget_stopped = True
@@ -333,7 +365,13 @@ def train(config=None, resume_from=None):
                    diagnostic_partial=cfg["DIAGNOSTIC_PARTIAL"],
                    train_metric_protocol="online_changing_weights_dropout_augmentation",
                    validation_metric_protocol="end_of_epoch_eval_no_augmentation")
-        for partition, result in [("train", tr), ("val", va)]:
+        results = [("train", tr), ("val", va)]
+        if te is not None:
+            row.update(train_eval_loss=te["loss"], loss_gap=va["loss"] - te["loss"],
+                       train_eval_seconds=eval_seconds,
+                       train_eval_metric_protocol="end_of_epoch_eval_no_augmentation_all_selected_train")
+            results.append(("train_eval", te))
+        for partition, result in results:
             for level in ["slice", "patient"]:
                 for key, value in result[level].items():
                     if key != "confusion_matrix":
@@ -354,6 +392,7 @@ def train(config=None, resume_from=None):
         # Guardar el LR posterior al scheduler en el mismo historial que se reanuda.
         pd.DataFrame(history).to_csv(directory / "history.csv", index=False)
         last_tr, last_va = scalar_metrics(tr), scalar_metrics(va)
+        last_train_eval = scalar_metrics(te) if te is not None else None
         checkpoint = snapshot(epoch)
         checkpoint.update(val_auc=va["slice"]["auc"], val_patient_auc=score)
         # Cada época completa se conserva, independientemente del antiguo SAVE_EVERY.
@@ -396,6 +435,7 @@ def train(config=None, resume_from=None):
                    train_patients=train_ds.df.patient_id.nunique(), validation_patients=val_ds.df.patient_id.nunique(),
                    pos_weight=weight, csv_sha256=hashes,
                    train_metric_note="Métricas online: parámetros y dropout cambian durante la época",
+                   train_eval_metric_note="Todos los cortes seleccionados; pesos finales, eval, sin augmentation" if cfg["EVALUATE_TRAIN"] else None,
                    cuda_peak_memory_bytes=torch.cuda.max_memory_allocated(device) if device.type == "cuda" else None)
     (details / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     patient = best_result["patient"]
@@ -407,6 +447,18 @@ def train(config=None, resume_from=None):
                 f"Distribuciones: {json.dumps(patient_probs['by_label'], ensure_ascii=False)}\n\n"
                 "Umbral fijo 0.50. El AUC usa puntuaciones continuas y no se modifica mediante el umbral.\n"
                 "Las épocas iniciales diagnostican aprendizaje temprano; no establecen superioridad estable.\n")
+    comparable = [r for r in history if r.get("train_eval_loss") is not None]
+    if comparable:
+        chosen = next(r for r in comparable if r["epoch"] == best_epoch)
+        analysis += (f"\nMejor época: train eval loss {chosen['train_eval_loss']:.6f}; "
+                     f"val loss {chosen['val_loss']:.6f}; gap {chosen['loss_gap']:.6f}.\n"
+                     "Comparar estas pérdidas; train_loss online sigue otro protocolo.\n")
+        if len(comparable) > 1:
+            dt = comparable[-1]["train_eval_loss"] - comparable[0]["train_eval_loss"]
+            dv = comparable[-1]["val_loss"] - comparable[0]["val_loss"]
+            analysis += f"Primera a última época: delta train eval loss {dt:.6f}; delta val loss {dv:.6f}.\n"
+            if dt < 0 and dv > 0:
+                analysis += "Separación compatible con sobreajuste; revisar todas las épocas y calibración.\n"
     (details / "analysis.md").write_text(analysis, encoding="utf-8")
     print(f"Mejor época por AUC de paciente: {best_epoch}; resultados: {directory}", flush=True)
     return directory, summary

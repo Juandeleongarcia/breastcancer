@@ -26,6 +26,7 @@ COMPATIBILITY_KEYS = [
 
 def contract(cfg):
     result = {key: cfg[key] for key in COMPATIBILITY_KEYS}
+    result["EVALUATE_TRAIN"] = cfg.get("EVALUATE_TRAIN", False)
     result["TRAIN_PATIENTS_PER_CLASS"] = cfg.get("TRAIN_PATIENTS_PER_CLASS")
     result["csv_sha256"] = {"train": canonical_csv_hash(cfg["TRAIN_CSV"]), "validation": canonical_csv_hash(cfg["VAL_CSV"])}
     sources = ["src/model.py", "src/dataset.py", "src/experiment.py", "src/checkpointing.py", "src/metrics.py", "src/configuration.py", "src/augmentation.py", "src/run_layout.py"]
@@ -49,9 +50,13 @@ def compatible_experiment_keys(cfg):
             prior = [dict(sources=sources, has_spatial_grid=False) for sources in
                      [migration["previous_sources"], *migration.get("compatible_source_sets", [])]]
             for entry in prior + migration.get("compatible_contracts", []):
+                if cfg.get("EVALUATE_TRAIN", False) and not entry.get("has_train_eval", False):
+                    continue
                 if not entry["has_spatial_grid"] and cfg["SPATIAL_GRID"] != 1:
                     continue
                 legacy = dict(current, source_sha256=entry["sources"])
+                if not entry.get("has_train_eval", False):
+                    legacy.pop("EVALUATE_TRAIN")
                 if not entry["has_spatial_grid"]:
                     legacy.pop("SPATIAL_GRID")
                 for train_sha, val_sha in product(csv_hash_variants(cfg["TRAIN_CSV"]), csv_hash_variants(cfg["VAL_CSV"])):
@@ -97,6 +102,7 @@ def load_resume(path, cfg):
     expected = contract(cfg)
     saved = dict(checkpoint["training_contract"])
     saved.setdefault("SPATIAL_GRID", 1)  # Ausencia histórica = pooling 1x1.
+    saved.setdefault("EVALUATE_TRAIN", False)  # Nunca inventar evaluaciones históricas.
     differences = [key for key in expected if expected[key] != saved.get(key)]
     if "csv_sha256" in differences:
         hashes = saved.get("csv_sha256", {})

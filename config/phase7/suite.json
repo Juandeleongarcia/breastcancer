@@ -1,0 +1,22 @@
+{
+  "phase": 7,
+  "required_backend": "rocm",
+  "experiments": [
+    {
+      "id": "SPATIAL_CONTROL",
+      "config": "config/phase7/SPATIAL_CONTROL.json"
+    },
+    {
+      "id": "SPATIAL_GENTLE_AUG",
+      "config": "config/phase7/SPATIAL_GENTLE_AUG.json"
+    },
+    {
+      "id": "SPATIAL_SMALL",
+      "config": "config/phase7/SPATIAL_SMALL.json"
+    },
+    {
+      "id": "SPATIAL_SCHEDULER",
+      "config": "config/phase7/SPATIAL_SCHEDULER.json"
+    }
+  ]
+}

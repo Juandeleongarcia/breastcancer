@@ -19,7 +19,7 @@ class CPU3Tests(unittest.TestCase):
             derived = cpu_config(entry)
             self.assertEqual({k for k in original if original[k] != derived[k]},
                              {'EPOCHS', 'RUN_NAME', 'INTERPRETATION'})
-            self.assertEqual(original['EPOCHS'], 10)
+            self.assertEqual(original['EPOCHS'], 20 if entry['id'] == 'WEIGHT_DECAY' else 10)
             self.assertEqual(derived['EPOCHS'], 3)
             self.assertFalse(derived['SMOKE_TEST'])
             self.assertIsNone(derived['MAX_VAL_BATCHES'])

@@ -24,7 +24,10 @@ def comparison(root="models", phase3_session=None):
         history = pd.read_csv(history_path) if history_path.exists() else pd.DataFrame()
         best = history[history.epoch.eq(summary["best_epoch"])] if "epoch" in history else pd.DataFrame()
         train_loss = float(best.iloc[0].train_loss) if not best.empty and "train_loss" in best else None
-        rows.append(dict(Train_loss_online_mejor_epoca=train_loss, Run=summary["run"], Experimento=summary["experiment"],
+        train_eval_loss = float(best.iloc[0].train_eval_loss) if not best.empty and "train_eval_loss" in best else None
+        rows.append(dict(Train_loss_online_mejor_epoca=train_loss, Train_eval_loss_mejor_epoca=train_eval_loss,
+                         Loss_gap_mejor_epoca=val["loss"]-train_eval_loss if train_eval_loss is not None else None,
+                         Run=summary["run"], Experimento=summary["experiment"],
                          Referencia=summary.get('comparison_parent',cfg.get('COMPARISON_PARENT')),
                          CNN=str(summary["cnn"]), Loss="ponderada" if summary["weighted_loss"] else "normal",
                          Clipping=summary["clipping"], Epocas=summary["epochs_completed"],

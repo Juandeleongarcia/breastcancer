@@ -84,11 +84,14 @@ def audit(configs):
                 'GENTLE_AUG': {'USE_AUGMENTATION', 'AUGMENTATION_MODE'}}
     differences = {}
     for name, cfg in configs.items():
-        assert cfg['EPOCHS'] == 10 and cfg['PATIENCE'] == 5 and cfg['PRIMARY_METRIC'] == 'patient_auc'
+        # El commit de clase 6e82ea3 amplió WEIGHT_DECAY a 20 épocas/paciencia 8.
+        protocol = (20, 8) if name == 'WEIGHT_DECAY' else (10, 5)
+        assert (cfg['EPOCHS'], cfg['PATIENCE']) == protocol and cfg['PRIMARY_METRIC'] == 'patient_auc'
         assert not cfg['SMOKE_TEST'] and not cfg['MAX_TRAIN_BATCHES'] and not cfg['MAX_VAL_BATCHES']
         assert cfg['STATS_PROVENANCE'] == 'verified_train_fit'
         changed = {k for k in reference if k not in {'RUN_NAME', 'DEVICE'} and reference[k] != cfg[k]}
-        assert changed == expected[name], (name, changed)
+        permitted = expected[name] | ({'EPOCHS', 'PATIENCE'} if name == 'WEIGHT_DECAY' else set())
+        assert changed == permitted, (name, changed)
         differences[name] = {k: {'reference': reference[k], 'experiment': cfg[k]} for k in sorted(changed)}
     local = []
     for path in summary_paths(project_path('models')):

@@ -226,3 +226,10 @@ python -m src.batch_train --suite config/phase5/gpu_suite.json --only BASE_UNWEI
 ## Fase 6: GPU AMD / ROCm en Linux
 
 Guía de la batería de cinco modelos, veinte épocas, preflight y reanudación: [GPU_FASE6.md](GPU_FASE6.md). Las imágenes y checkpoints son locales; no se incluyen en Git.
+
+## Fase 7: curvas comparables y controles espaciales
+
+Cuatro configuraciones independientes con evaluación completa de train al final de
+cada época, sin augmentation: [GPU_FASE7.md](GPU_FASE7.md).
+Auditoría, diferencias y límites de las referencias históricas:
+[documentation/FASE7.md](documentation/FASE7.md).

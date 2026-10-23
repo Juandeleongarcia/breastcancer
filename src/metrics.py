@@ -276,7 +276,7 @@ def calculate_confusion_metrics(
     }
 
 def plot_training_history(history_path="models/history.csv", output_dir="models"):
-    """Tres curvas sin aliases: paciente para accuracy/AUC; BCE por corte para loss.
+    """Paciente para accuracy/AUC; BCE por corte para loss, sin inventar históricos.
 
     Train es online con pesos cambiantes, dropout y augmentation si está activa.
     La validación usa pesos fijos al final de época, modo eval y sin augmentation.
@@ -292,8 +292,13 @@ def plot_training_history(history_path="models/history.csv", output_dir="models"
         ("auc", "ROC AUC por paciente" if patient else "ROC AUC por corte (histórico)", "ROC AUC")]:
         level = "patient_" if patient and metric != "loss" else ""
         fig, ax = plt.subplots(figsize=(9, 5.5))
-        ax.plot(history.epoch, history[f"train_{level}{metric}"], "o--", color="#777777",
-                label="Train online: pesos cambiantes; dropout/augment. según config")
+        comparable = f"train_eval_{level}{metric}" in history
+        if metric == "loss" or not comparable:
+            ax.plot(history.epoch, history[f"train_{level}{metric}"], "o--", color="#777777",
+                    label="Train online: pesos cambiantes; dropout/augment. según config")
+        if comparable:
+            ax.plot(history.epoch, history[f"train_eval_{level}{metric}"], "o-", color="#d17a00",
+                    label="Train eval: fin de época, eval, sin augmentation")
         ax.plot(history.epoch, history[f"val_{level}{metric}"], "o-", linewidth=2.5, color="#1764ab",
                 label="Validación interna: fin de época, eval, sin augmentation")
         if metric != "loss":
@@ -309,8 +314,25 @@ def plot_training_history(history_path="models/history.csv", output_dir="models"
         ax.set_xticks(history.epoch)
         ax.grid(alpha=.25)
         ax.legend(fontsize=8, loc="best")
-        fig.text(.5, .015, "Train online y validación final usan protocolos distintos: interpretar la diferencia con cautela.",
+        note = ("Train eval y validación: pesos finales; BCE por corte / métricas por paciente."
+                if comparable else "Train online y validación final usan protocolos distintos: interpretar la diferencia con cautela.")
+        fig.text(.5, .015, note,
                  ha="center", fontsize=8)
         fig.tight_layout(rect=(0, .035, 1, 1))
         fig.savefig(output_dir / f"{metric}_curve.png", dpi=160)
+        plt.close(fig)
+
+    if "train_eval_loss" in history:
+        fig, ax = plt.subplots(figsize=(9, 5.5))
+        for column, label, color in [
+                ("train_eval_loss", "Train eval: fin de época, sin augmentation", "#d17a00"),
+                ("val_loss", "Validación interna: fin de época, sin augmentation", "#1764ab")]:
+            ax.plot(history.epoch, history[column], "o-", color=color, label=label)
+        ax.set(xlabel="Época", ylabel="BCE media por corte (ponderada si se configuró)",
+               title="Pérdidas comparables · mismos pesos finales y criterio")
+        ax.set_xticks(history.epoch)
+        ax.legend(fontsize=8)
+        ax.grid(alpha=.25)
+        fig.tight_layout()
+        fig.savefig(output_dir / "loss_comparison.png", dpi=160)
         plt.close(fig)

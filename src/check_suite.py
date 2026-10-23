@@ -18,14 +18,31 @@ def require_rocm():
 
 
 def verify_suite(path='config/phase6/rocm20_suite.json', device='cpu', synthetic=True):
-    entries = load_config(path)['experiments']
+    suite = load_config(path)
+    entries = suite['experiments']
     configs = {e['id']: resolve_job(e['config'], device) for e in entries}
     expected = {'BASE_SPATIAL': set(), 'WEIGHT_DECAY': {'WEIGHT_DECAY'},
                 'REGIONAL_2X2': {'SPATIAL_GRID'}, 'GENTLE_AUG': {'USE_AUGMENTATION', 'AUGMENTATION_MODE'},
                 'DROPOUT_050': {'DROPOUT'}}
+    phase7 = suite.get('phase') == 7
+    if phase7:
+        expected = {'SPATIAL_CONTROL': set(),
+                    'SPATIAL_GENTLE_AUG': {'USE_AUGMENTATION', 'AUGMENTATION_MODE'},
+                    'SPATIAL_SMALL': {'CONV_CHANNELS'},
+                    'SPATIAL_SCHEDULER': {'SCHEDULER_PATIENCE'}}
     if set(configs) != set(expected):
-        raise ValueError('La batería debe contener exactamente los cinco modelos acordados')
-    base = configs['BASE_SPATIAL']
+        raise ValueError('La batería debe contener exactamente los modelos acordados para esta fase')
+    base = configs['SPATIAL_CONTROL' if phase7 else 'BASE_SPATIAL']
+    if phase7 and any(base[k] != v for k, v in dict(CONV_CHANNELS=[32,64,128],
+            CONVS_PER_BLOCK=2, SPATIAL_GRID=1, DROPOUT=.4, OPTIMIZER='adamw',
+            LEARNING_RATE=.0005, WEIGHT_DECAY=.0005, USE_BATCH_NORM=True,
+            USE_AUGMENTATION=False, SEED=42, BATCH_SIZE=16,
+            USE_WEIGHTED_LOSS=False, SCHEDULER='plateau', SCHEDULER_PATIENCE=2).items()):
+        raise ValueError('Control Fase 7 distinto del protocolo acordado')
+    if phase7 and (configs['SPATIAL_SMALL']['CONV_CHANNELS'] != [16,32,64]
+            or configs['SPATIAL_SCHEDULER']['SCHEDULER_PATIENCE'] != 3
+            or configs['SPATIAL_GENTLE_AUG']['AUGMENTATION_MODE'] != 'gentle_affine'):
+        raise ValueError('Variante Fase 7 distinta del contraste acordado')
     train = pd.read_csv(project_path(base['TRAIN_CSV']))
     val = pd.read_csv(project_path(base['VAL_CSV']))
     if set(train.patient_id) & set(val.patient_id):
@@ -52,10 +69,12 @@ def verify_suite(path='config/phase6/rocm20_suite.json', device='cpu', synthetic
         changed = {k for k in base if k not in {'RUN_NAME', 'COMPARISON_PARENT'} and cfg[k] != base[k]}
         if changed != expected[name]:
             raise ValueError(f'Diferencias no autorizadas en {name}: {changed}')
-        if (cfg['EPOCHS'] != 20 or cfg['PATIENCE'] != 5 or not cfg['USE_EARLY_STOPPING']
+        if (cfg['EPOCHS'] != 20 or cfg['PATIENCE'] != (8 if phase7 else 5) or not cfg['USE_EARLY_STOPPING']
                 or cfg['PRIMARY_METRIC'] != 'patient_auc' or cfg['STATS_PROVENANCE'] != 'verified_train_fit'
                 or cfg['SMOKE_TEST'] or cfg['MAX_TRAIN_BATCHES'] or cfg['MAX_VAL_BATCHES']):
             raise ValueError('Protocolo incompatible: '+name)
+        if phase7 and (not cfg['EVALUATE_TRAIN'] or cfg.get('TRAIN_PATIENTS_PER_CLASS')):
+            raise ValueError('Fase 7 requiere evaluación completa de train: '+name)
         parameters = None
         if synthetic:
             set_seed(cfg['SEED'])

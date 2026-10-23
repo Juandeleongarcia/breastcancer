@@ -34,6 +34,11 @@ def resolve_config(config=None):
     values = {k: v for k, v in vars(defaults).items() if k.isupper()}
     if config is not None:
         values.update(config if isinstance(config, dict) else vars(config))
+    # Los experimentos históricos conservan su protocolo al reanudarse.
+    # Las configuraciones Fase 7 activan explícitamente la evaluación adicional.
+    values.setdefault("EVALUATE_TRAIN", False)
+    if not isinstance(values["EVALUATE_TRAIN"], bool):
+        raise ValueError("EVALUATE_TRAIN debe ser booleano")
     if values.get("EARLY_STOPPING_PATIENCE") is not None:
         values["PATIENCE"] = values["EARLY_STOPPING_PATIENCE"]
     if values.get("RANDOM_SEED") is not None:

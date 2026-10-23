@@ -29,9 +29,9 @@ class Phase6Tests(unittest.TestCase):
         self.assertEqual(result['partitions']['validation']['patients'], 220)
         self.assertEqual(result['historical_reference']['source'], 'user_report_not_locally_verified')
         self.assertEqual(len(result['differences']), 5)
-        for cfg in configs.values():
-            self.assertEqual(cfg['PATIENCE'], 5)
-            self.assertEqual(cfg['EPOCHS'], 10)
+        for name, cfg in configs.items():
+            self.assertEqual(cfg['PATIENCE'], 8 if name == 'WEIGHT_DECAY' else 5)
+            self.assertEqual(cfg['EPOCHS'], 20 if name == 'WEIGHT_DECAY' else 10)
             self.assertFalse(cfg['USE_WEIGHTED_LOSS'])
 
     def test_budget_reserves_time_and_rejects_long_run(self):
