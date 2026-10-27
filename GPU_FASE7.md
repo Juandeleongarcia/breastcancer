@@ -5,8 +5,8 @@ de clase ya activado**. No instalar `requirements-lock.txt` de CPU ni sustituir
 PyTorch. En ROCm, PyTorch usa la API y el dispositivo `cuda`.
 Así lo documenta [PyTorch HIP](https://docs.pytorch.org/docs/stable/notes/hip.html).
 
-Los cambios Fase 7 aún necesitan autorización de commit/push antes de poder
-recibirlos en clase mediante pull. Una vez publicados:
+Fase 7 está publicada en el commit `dd91c802`. Para la planificación posterior al
+control ya entrenado, consultar [GPU_FASE7_1.md](GPU_FASE7_1.md). Sincronizar antes:
 
 ```bash
 git status --short
@@ -23,7 +23,8 @@ y recuperar los archivos originales; no generar particiones nuevas ni refit de s
 ROCm nativo y compatibilidad real de RX 6700 XT deben superar este preflight:
 haber pasado las pruebas CPU no acredita esa GPU ni sus drivers.
 
-Ejecutar primero el control; los siguientes comandos no alteran configuraciones:
+Comandos individuales sin alterar configuraciones. Si el control ya está completado,
+conservarlo y priorizar GENTLE_AUG y SMALL según la guía Fase 7.1:
 
 ```bash
 python -u -m src.batch_train --suite config/phase7/suite.json --device cuda --only SPATIAL_CONTROL
