@@ -13,7 +13,7 @@
     "src/dataset.py": "d773eb59d5a9b8642509ca2dfde5119714bdde0a79f73f3ecc093c50c7551379",
     "src/experiment.py": "f322403caec875ad51e39217bb93be1772d229e33c52817224e669c377ca1438",
     "src/checkpointing.py": "56eab171cca28bc8eb3bb33869555dbc08a09674100482f3491450ecd5f44669",
-    "src/metrics.py": "b7bb6262dfaf95127345a3fc4f6812857a5fcc4e2c8877f80bd8a7243c45fbb7",
+    "src/metrics.py": "5704f1a271e281129d9fa263aebbceacfab0fce0b47ecfc0f9d5dbda24e898dd",
     "src/configuration.py": "d764acf633322ddfd773d695929e2922abb70205f1170255b220d63169f30249",
     "src/augmentation.py": "3807698920b0832604c1e2160631602f3aca4e340274bffde6a16f9388c46fbf",
     "src/run_layout.py": "f21c3bf2206a380f5c3e0140ddb8bf80c1e325cabaeb63bea378835ec39d8f47"
@@ -57,6 +57,20 @@
       },
       "has_spatial_grid": true,
       "has_train_eval": false
+    },
+    {
+      "sources": {
+        "src/model.py": "fae79943cdb61caa56ead6070672d928f2e2d2bfb75f0a16ede23f3327a9f1d0",
+        "src/dataset.py": "d773eb59d5a9b8642509ca2dfde5119714bdde0a79f73f3ecc093c50c7551379",
+        "src/experiment.py": "f322403caec875ad51e39217bb93be1772d229e33c52817224e669c377ca1438",
+        "src/checkpointing.py": "56eab171cca28bc8eb3bb33869555dbc08a09674100482f3491450ecd5f44669",
+        "src/metrics.py": "b7bb6262dfaf95127345a3fc4f6812857a5fcc4e2c8877f80bd8a7243c45fbb7",
+        "src/configuration.py": "d764acf633322ddfd773d695929e2922abb70205f1170255b220d63169f30249",
+        "src/augmentation.py": "3807698920b0832604c1e2160631602f3aca4e340274bffde6a16f9388c46fbf",
+        "src/run_layout.py": "f21c3bf2206a380f5c3e0140ddb8bf80c1e325cabaeb63bea378835ec39d8f47"
+      },
+      "has_spatial_grid": true,
+      "has_train_eval": true
     }
   ]
 }

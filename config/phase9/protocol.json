@@ -1,0 +1,17 @@
+{
+  "samples_csv": "metadata/samples.csv",
+  "patients_csv": "metadata/patients.csv",
+  "samples_sha256": "db54c844573a764fa94a9439115b21f1a9989d7967057aace61809dc02330dca",
+  "data_dir": "breastdcedl",
+  "folds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "allowed_split": "train",
+  "reserved_split": "test",
+  "reserved_fold": -1,
+  "statistics_method": "png8_histogram_511_linear_quantiles_v1"
+}

@@ -30,6 +30,7 @@ def binary_metrics(labels, probabilities, threshold=0.5):
                 precision=float(precision_score(y, pred, zero_division=0)), recall=recall,
                 f1=float(f1_score(y, pred, zero_division=0)), sensitivity=recall,
                 specificity=float(tn / (tn + fp)) if tn + fp else 0.0,
+                balanced_accuracy=float((recall + (tn / (tn + fp) if tn + fp else 0.0))/2),
                 tn=int(tn), fp=int(fp), fn=int(fn), tp=int(tp),
                 confusion_matrix=[[int(tn), int(fp)], [int(fn), int(tp)]], n=len(y))
 

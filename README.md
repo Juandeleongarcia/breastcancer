@@ -239,3 +239,10 @@ Auditoría, diferencias y límites de las referencias históricas:
 Tres contrastes de un hiperparámetro, sin cambiar arquitecturas ni estadísticas:
 [GPU_FASE8.md](GPU_FASE8.md). Auditoría y límites de comparación:
 [documentation/FASE8.md](documentation/FASE8.md).
+
+## Fase 9: cinco folds oficiales
+
+Validación cruzada con `samples.csv:fold`, únicamente sobre train público, y
+normalización ajustada en cada fold: [GPU_FASE9.md](GPU_FASE9.md).
+Recuentos verificados, test reservado y límites del OOF:
+[documentation/FASE9.md](documentation/FASE9.md).
