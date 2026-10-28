@@ -246,3 +246,10 @@ Validación cruzada con `samples.csv:fold`, únicamente sobre train público, y
 normalización ajustada en cada fold: [GPU_FASE9.md](GPU_FASE9.md).
 Recuentos verificados, test reservado y límites del OOF:
 [documentation/FASE9.md](documentation/FASE9.md).
+
+## Fase 10: recuperación manual y comparación CV de tres modelos
+
+Continuar la campaña SMALL existente y ejecutar los candidatos F8 de dropout y
+learning rate con procesos independientes por fold: [GPU_FASE10.md](GPU_FASE10.md).
+Auditoría y compatibilidad con las campañas de Fase 9:
+[documentation/FASE10.md](documentation/FASE10.md).
