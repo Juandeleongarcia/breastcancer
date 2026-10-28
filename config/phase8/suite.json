@@ -1,0 +1,33 @@
+{
+  "phase": 8,
+  "required_backend": "rocm",
+  "experiments": [
+    {
+      "id": "F8_SMALL_LR",
+      "config": "config/phase8/F8_SMALL_LR.json",
+      "control_config": "config/phase7/SPATIAL_SMALL.json",
+      "expected_changes": {
+        "LEARNING_RATE": 0.0001
+      },
+      "reference_statistics_sha256": "9dd6759c70e7bf1408d512c01a7d770c5653964061991f8ba4972cb1c7e0c9b0"
+    },
+    {
+      "id": "F8_SMALL_DROPOUT",
+      "config": "config/phase8/F8_SMALL_DROPOUT.json",
+      "control_config": "config/phase7/SPATIAL_SMALL.json",
+      "expected_changes": {
+        "DROPOUT": 0.5
+      },
+      "reference_statistics_sha256": "9dd6759c70e7bf1408d512c01a7d770c5653964061991f8ba4972cb1c7e0c9b0"
+    },
+    {
+      "id": "F8_CONTROL_LR",
+      "config": "config/phase8/F8_CONTROL_LR.json",
+      "control_config": "config/phase7/SPATIAL_CONTROL.json",
+      "expected_changes": {
+        "LEARNING_RATE": 0.0001
+      },
+      "reference_statistics_sha256": "9dd6759c70e7bf1408d512c01a7d770c5653964061991f8ba4972cb1c7e0c9b0"
+    }
+  ]
+}

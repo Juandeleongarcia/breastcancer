@@ -233,3 +233,9 @@ Cuatro configuraciones independientes con evaluación completa de train al final
 cada época, sin augmentation: [GPU_FASE7.md](GPU_FASE7.md).
 Auditoría, diferencias y límites de las referencias históricas:
 [documentation/FASE7.md](documentation/FASE7.md).
+
+## Fase 8: LR y regularización con controles explícitos
+
+Tres contrastes de un hiperparámetro, sin cambiar arquitecturas ni estadísticas:
+[GPU_FASE8.md](GPU_FASE8.md). Auditoría y límites de comparación:
+[documentation/FASE8.md](documentation/FASE8.md).

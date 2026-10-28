@@ -5,9 +5,57 @@ import json
 from uuid import uuid4
 
 import pandas as pd
+import numpy as np
+from sklearn.metrics import average_precision_score
 
 from src.configuration import project_path
 from src.run_layout import summary_paths, technical_file
+
+
+def trainable_parameters(cfg):
+    """Cuenta exacta de nuestra CNN sin construirla ni consumir RNG."""
+    if not cfg.get('CONV_CHANNELS'):
+        return None
+    count, incoming = 0, cfg.get('INPUT_CHANNELS', 3)
+    for outgoing in cfg['CONV_CHANNELS']:
+        for _ in range(cfg.get('CONVS_PER_BLOCK', 1)):
+            count += outgoing*(incoming*cfg.get('KERNEL_SIZE', 3)**2+1)
+            if cfg.get('USE_BATCH_NORM', True):
+                count += 2*outgoing
+            incoming = outgoing
+    return count + incoming*cfg.get('SPATIAL_GRID', 1)**2 + 1
+
+
+def supplementary_analysis(directory, history, patient):
+    """Análisis de lectura; nunca escribe en un run ni reconstruye datos ausentes."""
+    result = dict(Balanced_accuracy_paciente=(patient['recall']+patient['specificity'])/2,
+                  Sensibilidad_paciente=patient['recall'], PR_AUC_AP_paciente=None,
+                  Prevalencia_pCR_validacion=None, Delta_train_eval_loss=None,
+                  Delta_val_loss=None, Min_val_loss=None, Epoca_min_val_loss=None,
+                  Evidencia_sobreajuste='sin_historial_comparable')
+    predictions = technical_file(directory, 'predictions_patient.csv')
+    if predictions.is_file():
+        frame = pd.read_csv(predictions)
+        if {'label','probability'} <= set(frame) and not frame.empty:
+            y, p = frame.label, frame.probability
+            if not y.isin([0,1]).all() or not np.isfinite(p).all() or not p.between(0,1).all():
+                raise ValueError('Predicciones inválidas en '+str(predictions))
+            result['Prevalencia_pCR_validacion'] = float(y.mean())
+            if y.nunique() == 2:
+                # AP no interpolada; no es el área trapezoidal de la curva PR.
+                result['PR_AUC_AP_paciente'] = float(average_precision_score(y,p))
+    if {'epoch','val_loss'} <= set(history) and history.val_loss.notna().any():
+        minimum = history.loc[history.val_loss.idxmin()]
+        result.update(Min_val_loss=float(minimum.val_loss), Epoca_min_val_loss=int(minimum.epoch))
+    if {'train_eval_loss','val_loss'} <= set(history):
+        complete = history[['train_eval_loss','val_loss']].dropna()
+        if len(complete) >= 2:
+            delta = complete.iloc[-1]-complete.iloc[0]
+            result.update(Delta_train_eval_loss=float(delta.train_eval_loss),
+                          Delta_val_loss=float(delta.val_loss),
+                          Evidencia_sobreajuste='separacion_compatible_no_prueba_causal' if
+                          delta.train_eval_loss < 0 and delta.val_loss > 0 else 'revisar_trayectoria_completa')
+    return result
 
 
 def comparison(root="models", phase3_session=None):
@@ -26,6 +74,7 @@ def comparison(root="models", phase3_session=None):
         train_loss = float(best.iloc[0].train_loss) if not best.empty and "train_loss" in best else None
         train_eval_loss = float(best.iloc[0].train_eval_loss) if not best.empty and "train_eval_loss" in best else None
         rows.append(dict(Train_loss_online_mejor_epoca=train_loss, Train_eval_loss_mejor_epoca=train_eval_loss,
+                         Parametros_entrenables=trainable_parameters(cfg),
                          Loss_gap_mejor_epoca=val["loss"]-train_eval_loss if train_eval_loss is not None else None,
                          Run=summary["run"], Experimento=summary["experiment"],
                          Referencia=summary.get('comparison_parent',cfg.get('COMPARISON_PARENT')),
@@ -45,7 +94,10 @@ def comparison(root="models", phase3_session=None):
                          Train_pacientes=summary.get("train_patients"), Val_pacientes=summary.get("validation_patients"),
                          Grupo_comparable="preliminar" if summary["diagnostic_partial"] else "train_completo",
                          Spatial_grid=cfg.get("SPATIAL_GRID",1), Weight_decay=cfg.get("WEIGHT_DECAY"),
-                         Val_loss=val["loss"], Tiempo_s=summary["seconds"], Estado=summary["status"]))
+                         Val_loss=val["loss"], Tiempo_s=summary["seconds"],
+                         Tiempo_total_s=summary.get('elapsed_training_seconds_total', summary['seconds']),
+                         **supplementary_analysis(directory, history, val['patient']),
+                         Estado=summary["status"]))
     for name in "ABCD" if phase3_session is None else []:
         if not any(row["Experimento"] == name and row["Estado"] == "entrenamiento_completo" for row in rows):
             rows.append(dict(Run=f"{name} completo", Experimento=name, Estado="experimento_pendiente"))

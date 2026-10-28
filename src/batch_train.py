@@ -142,6 +142,10 @@ def main():
             continue
         try:
             cfg = resolve_job(entry["config"], args.device, args.epochs)
+            if suite.get("phase") == 8:
+                from src.phase8 import audit_job
+                audited = audit_job(entry, cfg)
+                print("Contraste verificado: " + json.dumps(audited), flush=True)
             result_roots.add(cfg["RESULTS_DIR"])
             done = None if args.force_new else completed_run(cfg)
             if done:

@@ -17,8 +17,13 @@ def require_rocm():
         raise RuntimeError('Se requiere PyTorch ROCm con GPU AMD accesible; no se permite fallback CPU/CUDA NVIDIA')
 
 
-def verify_suite(path='config/phase6/rocm20_suite.json', device='cpu', synthetic=True):
+def verify_suite(path='config/phase6/rocm20_suite.json', device='cpu', synthetic=True, only=None):
     suite = load_config(path)
+    if suite.get('phase') == 8:
+        from src.phase8 import verify_phase8_suite
+        return verify_phase8_suite(path, device, synthetic, only)
+    if only:
+        raise ValueError('--only en preflight está disponible para Fase 8')
     entries = suite['experiments']
     configs = {e['id']: resolve_job(e['config'], device) for e in entries}
     expected = {'BASE_SPATIAL': set(), 'WEIGHT_DECAY': {'WEIGHT_DECAY'},
@@ -43,27 +48,7 @@ def verify_suite(path='config/phase6/rocm20_suite.json', device='cpu', synthetic
             or configs['SPATIAL_SCHEDULER']['SCHEDULER_PATIENCE'] != 3
             or configs['SPATIAL_GENTLE_AUG']['AUGMENTATION_MODE'] != 'gentle_affine'):
         raise ValueError('Variante Fase 7 distinta del contraste acordado')
-    train = pd.read_csv(project_path(base['TRAIN_CSV']))
-    val = pd.read_csv(project_path(base['VAL_CSV']))
-    if set(train.patient_id) & set(val.patient_id):
-        raise ValueError('Pacientes compartidos entre train y validación')
-    counts = {}
-    for name, frame, patients, slices, csv in [
-            ('train', train, 877, 8745, base['TRAIN_CSV']),
-            ('validation', val, 220, 2200, base['VAL_CSV'])]:
-        if (frame.patient_id.nunique() != patients or len(frame) != slices or frame.sample_id.duplicated().any()
-                or not frame.split.eq('train').all() or not frame.pCR.isin([0, 1]).all()
-                or not frame.groupby('patient_id').pCR.nunique().eq(1).all()):
-            raise ValueError('Partición interna inválida: '+name)
-        counts[name] = dict(patients=patients, slices=slices, sha256=file_hash(csv))
-        for column in ['path_pre', 'path_early', 'path_late']:
-            for relative in frame[column].unique():
-                relative = str(relative)
-                portable = PurePosixPath(relative)
-                if '\\' in relative or portable.is_absolute() or '..' in portable.parts:
-                    raise ValueError('Ruta no portable o fuera del dataset')
-                if not (project_path(base['DATA_DIR'])/relative).is_file():
-                    raise FileNotFoundError('Falta una imagen de train/validación: '+relative)
+    counts = verify_partitions(base)
     checks = []
     for name, cfg in configs.items():
         changed = {k for k in base if k not in {'RUN_NAME', 'COMPARISON_PARENT'} and cfg[k] != base[k]}
@@ -75,23 +60,63 @@ def verify_suite(path='config/phase6/rocm20_suite.json', device='cpu', synthetic
             raise ValueError('Protocolo incompatible: '+name)
         if phase7 and (not cfg['EVALUATE_TRAIN'] or cfg.get('TRAIN_PATIENTS_PER_CLASS')):
             raise ValueError('Fase 7 requiere evaluación completa de train: '+name)
-        parameters = None
-        if synthetic:
-            set_seed(cfg['SEED'])
-            actual = select_device(cfg)
-            model = BreastCancerCNN(cfg).to(actual)
-            images = torch.randn(2, 3, cfg['IMAGE_SIZE'], cfg['IMAGE_SIZE'], device=actual)
-            labels = torch.tensor([0., 1.], device=actual)
-            logits = model(images).squeeze(1)
-            torch.nn.functional.binary_cross_entropy_with_logits(logits, labels).backward()
-            if logits.shape != (2,) or not torch.isfinite(logits).all() or not all(
-                    p.grad is not None and torch.isfinite(p.grad).all() for p in model.parameters()):
-                raise RuntimeError('Forward/backward no finito: '+name)
-            parameters = sum(p.numel() for p in model.parameters())
-            del model, images, logits
+        parameters = check_network(cfg) if synthetic else None
         checks.append(dict(id=name, changes=sorted(changed), parameters=parameters, passed=True))
     return dict(partitions=counts, models=checks, synthetic_only=True,
                 hip_build=getattr(torch.version, 'hip', None), clinical_training_performed=False)
+
+
+def verify_partitions(base):
+    """Solo train/validación interna: entidades, rutas y correspondencia de fases."""
+    train = pd.read_csv(project_path(base['TRAIN_CSV']))
+    val = pd.read_csv(project_path(base['VAL_CSV']))
+    if set(train.patient_id) & set(val.patient_id):
+        raise ValueError('Pacientes compartidos entre train y validación')
+    paths = lambda frame: set(frame[['path_pre', 'path_early', 'path_late']].to_numpy().ravel())
+    if paths(train) & paths(val):
+        raise ValueError('Imágenes compartidas entre train y validación')
+    counts = {}
+    for name, frame, patients, slices, csv in [
+            ('train', train, 877, 8745, base['TRAIN_CSV']),
+            ('validation', val, 220, 2200, base['VAL_CSV'])]:
+        if (frame.patient_id.nunique() != patients or len(frame) != slices or frame.sample_id.duplicated().any()
+                or not frame.split.eq('train').all() or not frame.pCR.isin([0, 1]).all()
+                or not frame.groupby('patient_id').pCR.nunique().eq(1).all()):
+            raise ValueError('Partición interna inválida: '+name)
+        patient_labels = frame[['patient_id','pCR']].drop_duplicates().pCR
+        counts[name] = dict(patients=patients, slices=slices, sha256=file_hash(csv),
+                            patient_classes={str(k):int(v) for k,v in patient_labels.value_counts().items()},
+                            slice_classes={str(k):int(v) for k,v in frame.pCR.value_counts().items()},
+                            majority_accuracy=float(patient_labels.value_counts(normalize=True).max()))
+        for column in ['path_pre', 'path_early', 'path_late']:
+            for relative in frame[column].unique():
+                relative = str(relative)
+                portable = PurePosixPath(relative)
+                if '\\' in relative or portable.is_absolute() or '..' in portable.parts:
+                    raise ValueError('Ruta no portable o fuera del dataset')
+                if not (project_path(base['DATA_DIR'])/relative).is_file():
+                    raise FileNotFoundError('Falta una imagen de train/validación: '+relative)
+        for row in frame.itertuples():
+            phases = [PurePosixPath(getattr(row, k)) for k in ['path_pre','path_early','path_late']]
+            if (any(p.parent.name != str(row.patient_id) for p in phases)
+                    or any(not p.name.endswith('_'+phase+'.png') for p,phase in zip(phases,['PRE','EARLY','LATE']))
+                    or len({p.stem.rsplit('_',1)[0] for p in phases}) != 1):
+                raise ValueError('Las fases no corresponden al mismo paciente/corte')
+    return counts
+
+
+def check_network(cfg):
+    """Solo forward/backward sintético; no optimizer.step ni datos clínicos."""
+    set_seed(cfg['SEED'])
+    actual = select_device(cfg)
+    model = BreastCancerCNN(cfg).to(actual)
+    images = torch.randn(2, 3, cfg['IMAGE_SIZE'], cfg['IMAGE_SIZE'], device=actual)
+    logits = model(images).squeeze(1)
+    torch.nn.functional.binary_cross_entropy_with_logits(logits, torch.tensor([0.,1.], device=actual)).backward()
+    if logits.shape != (2,) or not torch.isfinite(logits).all() or not all(
+            p.grad is not None and torch.isfinite(p.grad).all() for p in model.parameters()):
+        raise RuntimeError('Forward/backward no finito')
+    return sum(p.numel() for p in model.parameters())
 
 
 def main():
@@ -99,13 +124,17 @@ def main():
     parser.add_argument('--suite', default='config/phase6/rocm20_suite.json')
     parser.add_argument('--device', choices=['cpu', 'cuda'], default='cpu')
     parser.add_argument('--require-rocm', action='store_true')
+    parser.add_argument('--only', nargs='+', help='Preflight de trabajos concretos de Fase 8')
     args = parser.parse_args()
     if args.require_rocm:
         if args.device != 'cuda':
             parser.error('--require-rocm requiere --device cuda (también en AMD)')
         require_rocm()
     check_device(args.device)
-    print(json.dumps(verify_suite(args.suite, args.device), indent=2))
+    result = verify_suite(args.suite, args.device, only=args.only)
+    print(json.dumps(result, indent=2))
+    if result.get('errors'):
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':
