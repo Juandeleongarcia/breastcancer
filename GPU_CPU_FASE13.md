@@ -213,3 +213,97 @@ para revisión, sin volver a ejecutar automáticamente. No cambiar umbral, époc
 pesos o configuración basándose en esos resultados.
 
 Streamlit permanece intacto y sin un modelo definitivo integrado.
+
+## 9. Alternativa: test externo con ensemble de los cinco checkpoints CV
+
+Esta vía **no necesita `final-train`**. Evalúa otro predictor: el ensemble de los
+cinco mejores checkpoints internos, no un modelo único ajustado con los 1.097
+pacientes. Debe decidirse utilizarlo antes de consultar sus resultados externos.
+No hay entrenamiento, refit de estadísticas, calibración, selección por test ni
+ajuste de umbral/pesos. No modifica la campaña existente.
+
+El comando está aislado en `src/phase13_ensemble.py`. Los archivos incluidos en
+`SOURCES` de Fase 13 permanecen idénticos; el `git pull` no invalida los contratos
+de los folds que ya se entrenaron en clase ni requiere rehacerlos.
+
+Desde Linux, con el entorno ROCm ya activo, recuperar **la misma campaña**:
+
+```bash
+git pull --ff-only origin main
+conda activate cancer
+CV='models/phase13/NOMBRE_REAL_DE_TU_CAMPANA_EXISTENTE'
+```
+
+Sustituir la ruta por la carpeta existente. No utilizar `prepare` ni `smoke` para
+esta evaluación. Esperar a que los cinco folds terminen y figuren como completos.
+Se comprueban historiales, perfiles, particiones, mejor época por AUC de validación,
+compatibilidad estricta de pesos y procedencia de cada checkpoint.
+
+Comprobación opcional **sin inferencia externa ni reserva de evaluación**:
+
+```bash
+python -m src.phase13_ensemble --campaign "$CV" --device cuda --check-only
+```
+
+Cuando se vaya a ejecutar la evaluación externa única:
+
+```bash
+python -u -m src.phase13_ensemble --campaign "$CV" --device cuda --confirm-external-test
+```
+
+En CPU, cambiar únicamente a `--device cpu`. No hay opciones para elegir menos
+folds, limitar pacientes, cambiar umbral o ajustar pesos. El conjunto externo
+debe contener los **176 pacientes** reservados y todos sus cortes.
+
+Para cada fold se usa su `best_epoch.pt`, sus percentiles/medias/DE de imagen y su
+transformador clínico guardado. Primero se obtiene la media de probabilidades de
+los cortes de cada paciente para ese modelo. Después se promedian esas **cinco
+probabilidades por paciente**, con peso 0,20 cada una. No se promedian logits ni
+se realiza una votación de clases. Los IDs se alinean explícitamente y se verifica
+la cobertura completa. Solo el ensemble agregado se evalúa contra las etiquetas
+externas; no se produce un ranking de los cinco modelos usando test.
+
+El umbral se fija en **0,50 antes de leer las etiquetas externas**. Las etiquetas
+no forman parte del dataset que recibe la red. Se usa `eval()` e `inference_mode()`
+y se procesa un modelo cada vez, con el dispositivo PyTorch `cuda` de ROCm.
+
+Resultados automáticos, sin sobrescribir informes o campañas anteriores:
+
+```text
+models/phase13/external_test/
+├── _evaluations/IDENTIDAD_CAMPANA.json
+└── ENSEMBLE13_FECHA_HORA_UUID/
+    ├── evaluation_manifest.json
+    ├── environment.json
+    ├── metrics.json
+    ├── metrics.csv
+    ├── predictions_patient.csv
+    ├── roc_curve.png
+    ├── confusion_matrix_patient.png
+    └── internals/predictions_slice_fold_0.csv ... fold_4.csv
+```
+
+El CSV de pacientes incluye las cinco probabilidades, su media, número de cortes,
+etiqueta y decisión al umbral fijado. Las métricas incluyen ROC AUC, matriz 2×2
+`[[TN, FP], [FN, TP]]`, sensibilidad/recall, especificidad, accuracy, balanced
+accuracy, precisión y F1. El manifiesto fija las cinco épocas y hashes de pesos,
+transformadores, agregación, umbral, versión de fuentes y entorno.
+
+La reserva se crea de forma exclusiva **antes de consultar el test** y se conserva
+si hay un error o interrupción. Una segunda ejecución sobre la misma campaña se
+rechaza, incluso si se cambiaron pesos. No eliminar la reserva ni cambiar de
+campaña para repetir/adaptar el experimento después de ver test. Ante un fallo,
+revisar el manifiesto y los archivos parciales; no hay `--force` ni reintento
+automático. La campaña CV, sus manifiestos y checkpoints nunca se escriben.
+
+Pruebas técnicas, exclusivamente con datos ficticios temporales:
+
+```bash
+python -B -m unittest discover -s tests -p test_phase13_ensemble.py -v
+```
+
+Estas pruebas prohíben backward y actualizaciones del optimizador, comprueban
+transformadores propios por fold, promedio por paciente, rechazo de checkpoints
+incompatibles/folds incompletos, reserva única y conservación exacta de la campaña.
+No se ha consultado ni ejecutado el test externo real desde Codex. La ejecución
+física en GPU ROCm debe realizarse en el ordenador de clase.
