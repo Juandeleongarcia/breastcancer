@@ -1,0 +1,15 @@
+<svg viewBox="0 0 440 280" xmlns="http://www.w3.org/2000/svg" aria-label="Esquema ilustrativo de tres canales temporales">
+        <defs><radialGradient id="g"><stop stop-color="#52838b"/><stop offset="1" stop-color="#112738"/></radialGradient>
+        <pattern id="grid" width="16" height="16" patternUnits="userSpaceOnUse"><path d="M 16 0 L 0 0 0 16" fill="none" stroke="#659aa0" stroke-opacity=".1"/></pattern></defs>
+        <ellipse cx="241" cy="241" rx="135" ry="17" fill="#030c18" opacity=".6"/>
+        <g transform="translate(80,20)"><rect x="95" y="0" width="205" height="185" rx="13" fill="#162f40" stroke="#426875"/>
+        <rect x="95" y="0" width="205" height="185" rx="13" fill="url(#grid)"/><path d="M123 100 Q180 35 241 85 T284 94" fill="none" stroke="#91c1bd" opacity=".5" stroke-width="2"/>
+        <text x="249" y="24" fill="#b8d5d8" font-size="10" font-family="sans-serif">LATE</text></g>
+        <g transform="translate(44,55)"><rect x="74" y="0" width="205" height="185" rx="13" fill="#173747" stroke="#5ba5a8"/>
+        <rect x="74" y="0" width="205" height="185" rx="13" fill="url(#grid)"/><path d="M97 110 Q131 103 152 54 T215 105 T261 82" fill="none" stroke="#68d7c7" opacity=".8" stroke-width="2"/>
+        <text x="224" y="24" fill="#c2e4e2" font-size="10" font-family="sans-serif">EARLY</text></g>
+        <g transform="translate(26,84)"><rect x="30" y="0" width="205" height="164" rx="13" fill="url(#g)" stroke="#6f9ca7"/>
+        <rect x="30" y="0" width="205" height="164" rx="13" fill="url(#grid)"/><circle cx="132" cy="82" r="47" fill="none" stroke="#9bd2d1" opacity=".45"/>
+        <circle cx="132" cy="82" r="29" fill="none" stroke="#75adaa" opacity=".6"/><path d="M94 82h76 M132 44v76" stroke="#b7e4dc" opacity=".4"/>
+        <text x="194" y="24" fill="#d2e9ea" font-size="10" font-family="sans-serif">PRE</text></g>
+        </svg>

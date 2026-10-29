@@ -1,0 +1,14 @@
+{
+  "results": {
+    "campaign": ""
+  },
+  "integration": {
+    "enabled": false,
+    "architecture": null,
+    "parameters": null,
+    "checkpoint": "",
+    "inference_config": "",
+    "final_metrics": null,
+    "test_results": null
+  }
+}
