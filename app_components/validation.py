@@ -38,7 +38,10 @@ def render():
     if catalog is None:
         empty('Resultados no disponibles','Preparar el paquete de artefactos; no se muestran métricas de ejemplo.');return
     root=st.session_state.bundle_root
-    comparison,detail,external=st.tabs(['Comparación interna','Curvas y folds','Test externo congelado'])
+    comparison,detail,thresholds,external=st.tabs(['Comparación interna','Curvas y folds','Umbrales OOF','Test externo congelado'])
+    with thresholds:
+        from app_components.thresholds import render as render_thresholds
+        render_thresholds(catalog)
     with comparison:
         rows=[]
         for kind,entry in catalog['modalities'].items():

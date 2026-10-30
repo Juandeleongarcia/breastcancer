@@ -46,6 +46,9 @@ No se atribuye al modelo de imagen el resultado externo del multimodal.
 2. Elegir modalidad. Para multimodal, introducir edad y subtipo. Si faltan datos,
    puede usarse imagen únicamente. La imputación clínica exige declarar la ausencia
    expresamente: nunca se muestra como un dato conocido.
+   Elegir también el umbral antes de analizar: original 0,50, recomendado OOF
+   multimodal (exploratorio) o personalizado. Queda bloqueado tras registrar la
+   muestra. No ajustarlo utilizando las etiquetas reveladas por el profesor.
 3. Cargar PRE, EARLY y LATE en los tres controles. PNG real, gris de 8 bits,
    256 × 256; hasta 1 MiB por fase. No DICOM, RGB ni imágenes reescaladas por la app.
 4. Comprobar la validación y las imágenes. Pulsar **Analizar muestra**.
@@ -95,6 +98,44 @@ El dashboard distingue CV interna, OOF, test guardado y nuevas muestras. Destaca
 sensibilidad cero al umbral 0,50 en el test externo disponible. ROC AUC y matriz al
 umbral fijo no son medidas intercambiables. No hay un control para optimizar umbral
 con test ni un botón para repetir la evaluación externa.
+
+## Análisis exploratorio del umbral pCR
+
+`config/app_oof_threshold.json` es un informe agregado independiente; no modifica
+el ZIP de pesos, los checkpoints ni los informes históricos. El Dockerfile y el
+generador del paquete de hosting incluyen este JSON; Community Cloud lo lee desde
+el repositorio. La app comprueba que su checksum de modelo corresponda al ensemble
+multimodal cargado antes de ofrecer la recomendación.
+
+Se recuperan las predicciones de validación por paciente de los cinco mejores
+checkpoints F13 y se contrastan con los dos informes OOF completos guardados, los
+hashes de campaña y los folds oficiales. Son 1.097 pacientes (322 pCR, 775 no pCR),
+cada uno con una sola predicción del modelo que lo excluyó de train.
+
+Rejilla fijada: 0,05–0,95, paso 0,01, 91 puntos. Decisión: pCR si probabilidad ≥
+umbral. Criterio: máximo Youden = sensibilidad + especificidad − 1. Empates dentro
+de 1e-12: más próximo a 0,50 y después mayor umbral. Precisión/F1 sin positivos
+predichos se definen como cero. Resultado real: **0,31**, Youden 0,273212,
+sensibilidad 0,608696, especificidad 0,664516, balanced accuracy 0,636606.
+
+En **Resultados y validación → Umbrales OOF** se comparan original/recomendado y un
+umbral interactivo: métricas, matrices y curvas. No requiere publicar filas por
+paciente. El control del dashboard no cambia el de la demostración. El CSV de la
+defensa guarda el umbral y su origen junto a la decisión; la probabilidad no cambia.
+
+**Limitación:** los mismos folds seleccionaron las épocas. Este análisis no es
+CV anidada ni validación independiente tras seleccionar el umbral. Las puntuaciones
+OOF proceden de un modelo por paciente y no del ensemble completo, por lo que la
+transferencia del umbral al ensemble para nuevas muestras es provisional. No hay
+garantía de sensibilidad externa. El informe externo original queda a 0,50 y no
+se recalcula. ROC AUC continuo no cambia al elegir otro umbral.
+
+Reproducción administrativa local (usar una salida nueva; nunca sobrescribe):
+
+```powershell
+.\.env\Scripts\python.exe -B -m app_services.thresholds --campaign models/phase13/CV13_SPATIAL_SMALL_MULTIMODAL_20261029_160300_a18cb0802b7b --output models/phase13/oof_threshold_reproduccion.json
+.\.env\Scripts\python.exe -B -m unittest discover -s tests -p test_app_thresholds.py -v
+```
 
 ## Paquete de inferencia y privacidad
 
@@ -214,7 +255,7 @@ configuración de hosting; no modificar pesos ni instalar requisitos ROCm allí.
 
 ## QA y límites de la comprobación
 
-Verificación local final: **35 pruebas superadas, cero fallos y cero omitidas**,
+Verificación local con análisis OOF: **43 pruebas superadas, cero fallos y cero omitidas**,
 incluidas las pruebas opcionales con pesos reales (`BREASTDCEDL_TEST_CHECKPOINTS=1`).
 Se han comprobado sin cambios por SHA256 los **566 archivos históricos** inventariados.
 Docker no se ha ejecutado localmente porque este ordenador no dispone del motor.

@@ -11,7 +11,7 @@ def prepare(destination):
     destination=Path(destination).resolve()
     if destination.exists():raise ValueError('La salida ya existe; elegir otra para no sobrescribirla')
     destination.mkdir(parents=True)
-    files=['app.py','config/config.py','config/app_release.json','.streamlit/config.toml',
+    files=['app.py','config/config.py','config/app_release.json','config/app_oof_threshold.json','.streamlit/config.toml',
            'deploy/requirements.txt','ATTRIBUTION.md','LICENSE']
     for folder,pattern in [('app_components','*.py'),('app_services','*.py'),('src','*.py'),('assets','*.css'),('assets','*.svg')]:
         files.extend(p.relative_to(ROOT).as_posix() for p in (ROOT/folder).glob(pattern))

@@ -22,7 +22,8 @@ class Defence:
             modelo=result['model'],checksum=result['checksum'],umbral=result['threshold'],
             probabilidad_pcr=result['patient_probability'],clase_predicha=result['prediction'],
             modelos=result['n_models'],cortes=result['n_slices'],dispositivo=result['device'],
-            segundos=result['seconds'],etiqueta_real=None)
+            segundos=result['seconds'],etiqueta_real=None,
+            origen_umbral=result.get('threshold_policy','Original 0,50'))
         self.records.append(row);self.seen.add(study.fingerprint);self.current=key
         return row
 

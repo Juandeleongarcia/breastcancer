@@ -5,6 +5,8 @@ from app_components.layout import section,cards,plot,resource,clear_input,next_s
 from app_components import charts
 from app_components.explorer import _signed_rgb
 from app_services import lab
+from app_services.thresholds import decision
+from app_components.thresholds import analysis_for
 from app_services.studies import PHASES,study_from_uploads
 
 
@@ -23,10 +25,27 @@ def render():
         st.caption('Imágenes y datos clínicos permanecen en memoria de esta sesión. El registro no incluye archivos, nombres ni identificadores.')
     st.html('<div class="b-pipeline"><div class="b-step"><b>01</b><strong>Seleccionar y cargar</strong><span>Modalidad y tres fases</span></div>'
         '<div class="b-step"><b>02</b><strong>Validar y visualizar</strong><span>PNG8 · 256 × 256 · sin reescalado</span></div>'
-        '<div class="b-step"><b>03</b><strong>Analizar y registrar</strong><span>Inferencia real · umbral fijo</span></div></div>')
+        '<div class="b-step"><b>03</b><strong>Analizar y registrar</strong><span>Inferencia real · umbral explícito</span></div></div>')
     st.subheader('1 · Seleccionar modelo y datos')
     kind=st.radio('Modalidad',['multimodal','image'],format_func=lambda v:lab.LABELS[v],
         key=f'input_kind_{nonce}',horizontal=True,on_change=clear_input,disabled=locked)
+    report=analysis_for(catalog) if kind=='multimodal' else None
+    choices=['Original 0,50']
+    if report is not None:choices.append(f"Recomendado OOF {report['recommended_threshold']:.2f} · exploratorio")
+    choices.append('Personalizado · exploratorio')
+    policy=st.selectbox('Umbral de clasificación',choices,key=f'input_threshold_policy_{kind}_{nonce}',
+                        disabled=locked,on_change=clear_input)
+    threshold=.5
+    if policy.startswith('Recomendado'):threshold=report['recommended_threshold']
+    elif policy.startswith('Personalizado'):
+        threshold=st.slider('Umbral pCR personalizado',.05,.95,.5,.01,key=f'input_threshold_{kind}_{nonce}',
+                            disabled=locked,on_change=clear_input)
+    st.caption(f'Umbral activo: {threshold:.2f} · pCR si probabilidad ≥ umbral. La probabilidad y el AUC no cambian.')
+    if threshold!=.5:
+        st.warning('Cambio exploratorio de decisión. No se ha validado en test este umbral. '
+                   'La recomendación OOF utiliza un modelo excluido por paciente y no el ensemble completo.')
+    st.caption('En modo defensa, el umbral se bloquea al registrar la muestra y no se cambia tras revelar su etiqueta. '
+               'No debe ajustarse con las etiquetas del profesor.')
     clinical=None;clinical_ok=True
     if kind=='multimodal':
         a,b=st.columns(2)
@@ -81,7 +100,7 @@ def render():
         if len(study.slice_indices)==1:
             st.warning('Se utiliza un solo corte. Su resultado no equivale directamente al procedimiento por paciente con múltiples cortes del estudio completo.')
     else:st.caption('Carga las tres fases para validar la muestra. No se generan predicciones de demostración.')
-    key=defense.input_key(study,kind,clinical) if study else None
+    key=defense.input_key(study,kind,clinical)+f':threshold:{threshold:.2f}' if study else None
     result=st.session_state.prediction
     if result is not None and result.get('input_key')!=key:result=None;st.session_state.prediction=None
     st.subheader('3 · Ejecutar inferencia')
@@ -91,9 +110,12 @@ def render():
             with st.spinner('Cargando modelos verificados y ejecutando inferencia…'):
                 bundle=resource(st.session_state.bundle_root,kind,catalog['modalities'][kind]['checksum'])
                 result=lab.predict(study,bundle,clinical)
+                result=decision(result,threshold)
+                result['threshold_policy']=policy
                 result['input_key']=key
             if defense_mode:defense.record(result,study,key)
             st.session_state.prediction=result
+            if defense_mode:st.rerun()  # Mostrar inmediatamente controles bloqueados y contador actualizado.
         except (OSError,ValueError,RuntimeError,KeyError) as problem:
             st.session_state.prediction=None;result=None
             st.error('No se pudo ejecutar una inferencia válida: '+str(problem))
@@ -102,7 +124,7 @@ def render():
         with a:plot(charts.probability_donut(result['patient_probability']),'prediction_probability')
         with b:
             st.subheader('pCR' if result['prediction'] else 'no pCR · enfermedad residual')
-            st.write('Clasificación al umbral **0,50**. La etiqueta describe respuesta al tratamiento; no presencia o ausencia de cáncer.')
+            st.write(f"Clasificación al umbral **{result['threshold']:.2f}**. La etiqueta describe respuesta al tratamiento; no presencia o ausencia de cáncer.")
             cards([('Modelos',result['n_models'],result['model']),('Tiempo',f"{result['seconds']:.3f} s",'Inferencia y transformación; sin carga inicial')])
             st.caption(f"Dispositivo: {result['device']} · Cortes: {result['n_slices']} · SHA256: {result['checksum']}")
         st.info('Estimación experimental, sin intervalo de confianza clínico validado. No equivale a supervivencia o curación ni debe cambiar decisiones terapéuticas.')
@@ -114,7 +136,7 @@ def render():
             st.dataframe([dict(fold=m['fold'],epoca=m['epoch'],parametros=m['parameters'],
                 sha256_origen=m['original_sha256'],probabilidad=result['member_probabilities'][m['fold']])
                 for m in catalog['modalities'][kind]['members']],hide_index=True,width='stretch')
-            plot(charts.slice_probabilities(dict(slices=result['slices'],patient_probability=result['patient_probability'],threshold=.5)),
+            plot(charts.slice_probabilities(dict(slices=result['slices'],patient_probability=result['patient_probability'],threshold=result['threshold'])),
                  'slice_probabilities')
         if defense_mode:
             label=st.selectbox('Etiqueta real · solo si el profesor ya la ha revelado',[None,0,1],

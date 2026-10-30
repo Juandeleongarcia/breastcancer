@@ -12,6 +12,7 @@ COPY .streamlit /app/.streamlit
 COPY src /app/src
 COPY config/config.py /app/config/config.py
 COPY config/app_release.json /app/config/app_release.json
+COPY config/app_oof_threshold.json /app/config/app_oof_threshold.json
 RUN mkdir /app/models && chown -R appuser:appuser /app
 USER appuser
 EXPOSE 7860
