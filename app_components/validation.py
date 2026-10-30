@@ -1,134 +1,112 @@
+"""Solo resultados agregados verificados; no existe un botón para reevaluar test."""
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
-from app_components.layout import section, cards, empty, plot
+from app_components.layout import section,cards,plot,empty
 from app_components import charts
-from app_services.results import read_campaign, aggregate_histories
+from app_services.results import aggregate_histories
+from app_services.lab import safe_file,LABELS
 
 
-def _format(value, digits=4):
-    return '—' if value is None or not np.isfinite(value) else f'{value:.{digits}f}'
-
-
-def _read(campaign):
-    if not campaign:return None,None
-    try:return read_campaign(campaign),None
-    except (OSError,ValueError,KeyError,TypeError) as error:return None,str(error)
-
-
-def _public_issue(message):
-    text = str(message).lower()
-    if 'pacient' in text or 'predic' in text:return 'Las predicciones no cumplen la cobertura requerida por paciente.'
-    if any(word in text for word in ['oficial','partición','csv','protocolo']):return 'No se ha podido verificar el protocolo y las particiones oficiales.'
-    if 'época' in text or 'historial' in text:return 'El historial y el resumen requieren revisión.'
-    return 'Faltan archivos requeridos o los resultados no superan la verificación de integridad.'
-
-
-def render(campaign_path=''):
-    section('EVIDENCIA EXPERIMENTAL','Resultados y validación cruzada','Resultados reales, métricas por paciente y cobertura explícita de los cinco folds oficiales.')
-    with st.expander('Cargar resultados reales',expanded=not bool(campaign_path)):
-        direct = st.text_input('Carpeta de resultados CV',value=campaign_path,key='direct_campaign',type='password',
-                           help='Ruta local de una campaña compatible. Se oculta en pantalla durante la demostración.')
-    st.button('Actualizar resultados',icon=':material/refresh:',key='refresh_results')
-    report,error = _read(direct.strip())
-    if report:
-        st.caption('Datos de validación aportados · lectura local y de solo lectura. No se presentan como resultados del test ni como selección del modelo definitivo.')
-    metrics = report.metrics if report else {}
-    complete = report is not None and report.complete
-    qualifier = '5 folds verificados' if complete else 'Provisional · solo folds verificados' if report else 'Pendiente de integrar'
-    cards([('ROC AUC medio',_format(metrics.get('auc_mean')),qualifier),
-           ('DE del AUC',_format(metrics.get('auc_std')),'Desviación estándar muestral'),
-           ('ROC AUC OOF',_format(metrics.get('oof_auc')),'Solo con cobertura completa'),
-           ('Folds completos',f"{metrics.get('complete_folds',0)} / 5",'Integrados y verificados en esta app')])
-    st.write('')
-    cards([('Accuracy',_format(metrics.get('accuracy')),'Media por paciente entre folds'),
-           ('Balanced accuracy',_format(metrics.get('balanced_accuracy')),'Equilibrio entre ambas clases'),
-           ('Pacientes evaluados',str(metrics['patients']) if metrics.get('patients') else '—','Pacientes de folds verificados')])
-    if report is None:
-        if error:st.warning(_public_issue(error))
-        empty('Los resultados están por llegar',
-              'La estructura del dashboard está preparada para los archivos reales de los cinco folds. Las métricas definitivas y los resultados del test siguen pendientes.')
+def roc_plot(entry,external=False):
+    fig=go.Figure()
+    if external:
+        series=[('Test externo congelado',entry['roc'],entry['metrics']['auc'],charts.TEAL)]
     else:
-        if not complete:
-            st.info('VALIDACIÓN PROVISIONAL · No se presenta como CV final hasta verificar los cinco folds. No se calcula una matriz global ni AUC OOF parcial.')
-        if report.issue:st.warning(_public_issue(report.issue))
-        for fold in report.folds:
-            if fold.issue:st.warning(f'Fold {fold.fold}: '+_public_issue(fold.issue))
-        summary,individual,means = st.tabs(['Resumen de CV','Detalle por fold','Curvas medias'])
-        with summary:
-            table = pd.DataFrame([{'Fold':f.fold,'Estado':f.status,'AUC paciente':f.metrics.get('auc') if f.complete else None,
-                'Mejor época':f.summary.get('best_epoch'),'Pacientes':len(f.predictions) if f.complete else None,
-                'Accuracy':f.metrics.get('accuracy') if f.complete else None,
-                'Balanced accuracy':f.metrics.get('balanced_accuracy') if f.complete else None} for f in report.folds])
-            st.dataframe(table,hide_index=True,width='stretch')
-            a,b = st.columns(2)
-            with a:
-                st.subheader('Discriminación entre folds')
-                plot(charts.fold_auc_figure(report),'auc_by_fold')
-                st.caption('La variación entre folds refleja sensibilidad a la partición. La DE usa ddof=1; con un único fold no se define.')
-            with b:
-                st.subheader('Curvas ROC por paciente')
-                if report.completed:plot(charts.roc_figure(report.completed,report.oof),'roc_campaign')
-                else:empty('ROC pendiente','Se necesitan predicciones por paciente válidas de un fold completo.')
-                st.caption('Cada línea procede de probabilidades guardadas. La OOF agrupa cinco folds completos; no es una media interpolada de curvas ROC.')
-            if complete:
-                st.subheader('Matriz global OOF · paciente')
-                a,b = st.columns([1.3,1])
-                with a:plot(charts.confusion_figure(report.oof_metrics),'oof_confusion')
-                with b:
-                    st.write('Umbral guardado:',report.completed[0].config['CLASSIFICATION_THRESHOLD'])
-                    st.write('Sensibilidad:',_format(report.oof_metrics['recall']))
-                    st.write('Especificidad:',_format(report.oof_metrics['specificity']))
-                    st.write('F1:',_format(report.oof_metrics['f1']))
-                    st.caption('Una predicción por paciente, procedente únicamente del fold donde fue excluido del entrenamiento.')
-            st.download_button('Descargar tabla de folds',table.to_csv(index=False).encode(),
-                               file_name='validacion_folds.csv',mime='text/csv',key='download_folds')
-        with individual:
-            fold_index = st.selectbox('Fold a revisar',list(range(5)),format_func=lambda n:f'Fold {n} · {report.folds[n].status}',key='validation_fold')
-            fold = report.folds[fold_index]
-            if fold.history.empty:
-                empty('Este fold aún no tiene historial','Los datos aparecerán cuando su RUN esté disponible. No se completan épocas inexistentes.')
-            else:
-                st.caption(f"Historial real · {len(fold.history)} épocas · mejor época declarada: {fold.summary.get('best_epoch','pendiente')}")
-                figure,comparable = charts.history_curve(fold.history,'loss')
-                if fold.summary.get('best_epoch'):figure.add_vline(x=fold.summary['best_epoch'],line_dash='dot',line_color=charts.MUTED)
-                st.subheader('Evolución de las pérdidas')
-                plot(figure,'individual_losses')
-                if not comparable:st.warning('Train loss online: pesos cambiantes. No equivale a train_eval_loss; se identifica con línea discontinua.')
-                else:st.caption('Train eval y validación: pesos de final de época, sin augmentation. Se muestra toda la evolución, sin suavizar.')
-                a,b = st.columns(2)
-                with a:
-                    figure,_ = charts.history_curve(fold.history,'accuracy');plot(figure,'individual_accuracy')
-                with b:
-                    figure,_ = charts.history_curve(fold.history,'auc');plot(figure,'individual_auc')
-                if 'learning_rate' in fold.history:
-                    st.subheader('Learning rate utilizado')
-                    plot(charts.lr_figure(fold.history),'individual_lr')
-                if fold.metrics:
-                    a,b = st.columns(2)
-                    with a:plot(charts.roc_figure([fold]),'individual_roc')
-                    with b:plot(charts.confusion_figure(fold.metrics),'individual_confusion')
-                    st.caption('Matriz por paciente, umbral '+str(fold.config['CLASSIFICATION_THRESHOLD'])+'.')
-                with st.expander('Datos numéricos del historial'):
-                    columns = [name for name in fold.history if name=='epoch' or name in ['learning_rate','next_learning_rate']
-                               or name.endswith(('_loss','_auc','_accuracy','_recall','_specificity','_f1'))]
-                    st.dataframe(fold.history[columns],hide_index=True,width='stretch')
-        with means:
-            histories = {f.fold:f.history for f in report.completed if not f.history.empty}
-            st.caption('Se agregan únicamente folds completados y verificados. Los historiales en ejecución pueden revisarse en Detalle por fold.')
-            label = st.radio('Cobertura por época',['Todas las épocas disponibles','Solo épocas comunes a los cinco folds'],key='mean_mode',horizontal=True)
-            mode = 'common' if label.startswith('Solo') else 'all'
-            use_eval = any('train_eval_loss' in frame for frame in histories.values())
-            column = 'train_eval_loss' if use_eval else 'train_loss'
-            if not use_eval:st.warning('No hay train_eval_loss: la curva de train es online, con pesos cambiantes, y no equivale a evaluación de final de época.')
-            elif any(column not in frame for frame in histories.values()):
-                st.info('Los folds sin train_eval_loss no contribuyen a esta curva comparable; su número se muestra por época.')
-            aggregated = aggregate_histories(histories,mode,column)
-            if aggregated.empty:
-                empty('Aún no hay cobertura para esta vista','La vista común requiere datos de los cinco folds en la misma época. Puedes elegir todas las épocas disponibles.')
-            else:
-                plot(charts.mean_loss_curve(aggregated,'Train eval' if use_eval else 'Train online'),'mean_losses')
-                st.caption('Media y ±1 DE muestral. Con un único fold no se dibuja banda. No hay relleno con ceros, repetición de valores ni interpolación de épocas.')
-                st.dataframe(aggregated,hide_index=True,width='stretch')
-                st.download_button('Descargar medias por época',aggregated.to_csv(index=False).encode(),file_name='perdidas_medias.csv',mime='text/csv')
+        series=[(f'Fold {f["fold"]}',f['roc'],f['metrics']['auc'],color) for f,color in zip(entry['folds'],
+            [charts.TEAL,charts.PURPLE,'#85ABD4','#D9B878','#C999AF'])]
+        series.append(('OOF interno',entry['oof']['roc'],entry['oof']['metrics']['auc'],charts.WHITE))
+    for name,data,auc,color in series:
+        fig.add_scatter(x=data['fpr'],y=data['tpr'],mode='lines',name=f'{name} · AUC {auc:.4f}',line=dict(color=color))
+    fig.add_scatter(x=[0,1],y=[0,1],mode='lines',name='Referencia aleatoria',line=dict(color=charts.MUTED,dash='dot'))
+    charts.style(fig,440);fig.update_layout(hovermode='closest',legend=dict(orientation='h',y=-.25))
+    fig.update_xaxes(title='1 − especificidad',range=[0,1]);fig.update_yaxes(title='Sensibilidad',range=[0,1])
+    return fig
+
+
+def metric_cards(metrics):
+    cards([(label,f'{metrics[key]:.1%}',detail) for label,key,detail in [
+        ('Accuracy','accuracy','Clasificación global'),('Balanced accuracy','balanced_accuracy','Media de sensibilidad y especificidad'),
+        ('Sensibilidad pCR','recall','TP / (TP + FN)'),('Especificidad','specificity','TN / (TN + FP)')]])
+
+
+def render():
+    section('EVIDENCIA EXPERIMENTAL','Resultados y validación','CV interna, OOF y test externo se presentan por separado. Todas las cifras proceden de resultados guardados.')
+    catalog=st.session_state.catalog
+    if catalog is None:
+        empty('Resultados no disponibles','Preparar el paquete de artefactos; no se muestran métricas de ejemplo.');return
+    root=st.session_state.bundle_root
+    comparison,detail,external=st.tabs(['Comparación interna','Curvas y folds','Test externo congelado'])
+    with comparison:
+        rows=[]
+        for kind,entry in catalog['modalities'].items():
+            m=entry['metrics']
+            st.subheader(LABELS[kind])
+            cards([('AUC CV medio',f'{m["auc_mean"]:.4f}',f'DE muestral: {m["auc_std"]:.4f} · 5 folds'),
+                ('AUC OOF',f'{m["oof_auc"]:.4f}','Probabilidades fuera de entrenamiento'),
+                ('Desarrollo',str(entry['development_patients']),'Pacientes · una predicción OOF por paciente')])
+            for f in entry['folds']:
+                rows.append(dict(modelo=LABELS[kind],fold=f['fold'],epocas=f['epochs'],mejor_epoca=f['best_epoch'],
+                    **{key:f['metrics'][key] for key in ['auc','accuracy','precision','recall','specificity','balanced_accuracy','f1']}))
+        table=pd.DataFrame(rows);st.dataframe(table,hide_index=True,width='stretch')
+        fig=go.Figure()
+        for kind,color in [('image',charts.PURPLE),('multimodal',charts.TEAL)]:
+            folds=catalog['modalities'][kind]['folds']
+            fig.add_scatter(x=[f['fold'] for f in folds],y=[f['metrics']['auc'] for f in folds],
+                mode='lines+markers',name=LABELS[kind],line=dict(color=color))
+        charts.style(fig,360,'ROC AUC por paciente · mismos cinco folds')
+        fig.update_xaxes(title='Fold de validación',dtick=1);fig.update_yaxes(title='ROC AUC por paciente',range=[0,1])
+        plot(fig,'paired_auc')
+        st.caption('Comparación descriptiva; cinco folds no son cinco muestras independientes. La selección del checkpoint utiliza el mismo fold de validación: no es CV anidada ni prueba de superioridad clínica.')
+        st.download_button('Descargar tabla agregada de folds',table.to_csv(index=False).encode(),file_name='comparacion_folds.csv',mime='text/csv')
+    with detail:
+        kind=st.selectbox('Modelo a revisar',['multimodal','image'],format_func=lambda k:LABELS[k],key='results_kind')
+        entry=catalog['modalities'][kind]
+        selected=st.selectbox('Fold',range(5),format_func=lambda f:f'Fold {f}',key='validation_fold')
+        f=entry['folds'][selected]
+        histories={item['fold']:pd.read_csv(safe_file(root,item['history'])) for item in entry['folds']}
+        history=histories[selected]
+        st.caption(f"{f['epochs']} épocas completadas · mejor checkpoint: época {f['best_epoch']} por AUC de validación por paciente")
+        zoom=st.radio('Escala de pérdidas',['Completa','Zoom del eje Y'],horizontal=True,key='loss_scale')
+        figure,comparable=charts.history_curve(history,'loss')
+        figure.add_vline(x=f['best_epoch'],line_dash='dot',line_color=charts.MUTED)
+        if zoom!='Completa':
+            limit=max(1.,float(history[['train_eval_loss','val_loss']].max().max())*1.1)
+            low,high=st.slider('Intervalo visible · BCE',0.,limit,(0.,min(1.,limit)),key=f'loss_ylim_{kind}_{selected}')
+            if low<high:figure.update_yaxes(range=[low,high],rangemode='normal')
+            st.caption('Solo cambia la ventana visible. No se alteran datos, puntos ni valores fuera del intervalo.')
+        plot(figure,'fold_losses')
+        st.caption('Train eval y validación: pesos de final de época, sin augmentation. BCE por corte; AUC y accuracy por paciente. No hay suavizado.')
+        a,b=st.columns(2)
+        with a:plot(charts.history_curve(history,'accuracy')[0],'fold_accuracy')
+        with b:plot(charts.history_curve(history,'auc')[0],'fold_auc')
+        with st.expander('Historial numérico'):
+            st.dataframe(history,hide_index=True,width='stretch')
+        metric_cards(f['metrics'])
+        a,b=st.columns(2)
+        with a:plot(roc_plot(entry),'internal_roc')
+        with b:plot(charts.confusion_figure(f['metrics']),'fold_confusion')
+        st.caption('ROC: folds y OOF internos. Matriz: el fold seleccionado; umbral fijo 0,50.')
+        st.subheader('Pérdidas medias de validación cruzada')
+        mode=st.radio('Cobertura de épocas',['Todas las disponibles','Comunes a cinco folds'],horizontal=True,key='mean_mode')
+        aggregate=aggregate_histories(histories,'common' if mode.startswith('Comunes') else 'all')
+        if len(aggregate):plot(charts.mean_loss_curve(aggregate),'mean_losses')
+        else:st.info('No hay épocas comunes suficientes para esta vista.')
+        st.caption('Media ±1 DE muestral. Número de folds explícito por época; sin prolongar curvas tras early stopping ni rellenar épocas.')
+        st.dataframe(aggregate,hide_index=True,width='stretch')
+    with external:
+        entry=catalog['external'];m=entry['metrics']
+        st.subheader('Ensemble multimodal · evaluación externa guardada')
+        cards([('ROC AUC',f'{m["auc"]:.4f}','Puntuaciones continuas por paciente'),
+            ('Pacientes',str(m['n']),'Test externo reservado'),('Umbral','0,50','Fijado antes de consultar test')])
+        metric_cards(m)
+        if m['recall']==0:
+            st.error(f'Sensibilidad cero: {m["tp"]} verdaderos positivos y {m["fn"]} falsos negativos de pCR. La accuracy refleja en gran medida el predominio de no pCR; no demuestra una buena detección de respuesta completa.')
+        a,b=st.columns(2)
+        with a:plot(roc_plot(entry,True),'external_roc')
+        with b:plot(charts.confusion_figure(m),'external_confusion')
+        st.info('ROC AUC evalúa la ordenación de puntuaciones a distintos umbrales; la matriz usa únicamente 0,50. No se ajusta ese umbral mirando el test.')
+        st.caption('Se visualizan estadísticas ya guardadas. Abrir esta página nunca carga imágenes externas, ejecuta el evaluador ni sustituye sus resultados.')
+        st.caption('Informe: '+entry['report_id'])

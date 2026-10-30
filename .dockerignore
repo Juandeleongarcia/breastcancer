@@ -1,0 +1,15 @@
+.git
+.env
+.venv
+models
+metadata
+breastdcedl
+dataset
+backups
+tests
+documentation
+__pycache__
+.streamlit/secrets.toml
+*.pt
+*.pth
+*.zip

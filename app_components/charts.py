@@ -177,16 +177,36 @@ def slice_stack(study, phase, selected):
     axis = np.arange(0,256,4)
     x,y = np.meshgrid(axis,axis)
     for i in indices:
-        figure.add_surface(x=x,y=y,z=np.full(x.shape,i),surfacecolor=study.phases[i,phase,::4,::4]/255.,
+        figure.add_surface(x=x,y=y,z=np.full(x.shape,study.slice_indices[i]),surfacecolor=study.phases[i,phase,::4,::4]/255.,
             cmin=0,cmax=1,colorscale='Gray',opacity=.95 if i==selected else .20,showscale=False,
             name=f'z{study.slice_indices[i]:03d}',hovertemplate=f'Corte z{study.slice_indices[i]:03d}<extra></extra>')
-    figure.add_scatter3d(x=[0,255,255,0,0],y=[0,0,255,255,0],z=[selected]*5,
+    figure.add_scatter3d(x=[0,255,255,0,0],y=[0,0,255,255,0],z=[study.slice_indices[selected]]*5,
                          mode='lines',line=dict(color=TEAL,width=5),showlegend=False,hoverinfo='skip')
     style(figure,510,'Pila esquemática · no reconstrucción anatómica')
     figure.update_layout(hovermode='closest',scene=dict(bgcolor='rgba(0,0,0,0)',
-        xaxis_title='X (píxel)',yaxis_title='Y (píxel)',zaxis_title='Orden de corte · sin mm',
+        xaxis_title='X (píxel)',yaxis_title='Y (píxel)',zaxis_title='Índice axial z · sin mm',
         aspectmode='manual',aspectratio=dict(x=1,y=1,z=.7),camera=dict(eye=dict(x=1.5,y=-1.7,z=1.1))))
     return figure, len(indices)
+
+
+def intensity_surface(study,phase,selected=0):
+    axis=np.arange(0,256,4);x,y=np.meshgrid(axis,axis)
+    figure=go.Figure(go.Surface(x=x,y=y,z=study.phases[selected,phase,::4,::4]/255.,
+        colorscale='Viridis',colorbar=dict(title='Intensidad'),hovertemplate='x=%{x}, y=%{y}<br>Intensidad=%{z:.3f}<extra></extra>'))
+    style(figure,500,'Superficie matemática de intensidad · no reconstrucción anatómica')
+    figure.update_layout(scene=dict(xaxis_title='X (píxel)',yaxis_title='Y (píxel)',zaxis_title='Intensidad PNG [0,1]'))
+    return figure
+
+
+def temporal_curve(study,selected,x,y,radius):
+    region=study.phases[selected,:,max(0,y-radius):min(256,y+radius+1),max(0,x-radius):min(256,x+radius+1)]
+    values=region.astype(float).mean(axis=(1,2))/255.
+    figure=go.Figure(go.Scatter(x=['PRE','EARLY','LATE'],y=values,mode='lines+markers',
+        line=dict(color=TEAL,width=3),marker=dict(size=10),name='Media de la región'))
+    style(figure,300,'Tres adquisiciones temporales · intensidad media de la región')
+    figure.update_xaxes(title='Fase temporal · sin tiempos de adquisición en segundos')
+    figure.update_yaxes(title='Intensidad PNG [0,1]',range=[0,1])
+    return figure
 
 
 def image_zoom(image, title, signed=False):

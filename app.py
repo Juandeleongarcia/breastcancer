@@ -1,7 +1,7 @@
 """BreastDCEDL AI: ejecutar con python -m streamlit run app.py."""
 import streamlit as st
 
-st.set_page_config(page_title='BreastDCEDL AI · Treatment Response',page_icon=':material/biotech:',
+st.set_page_config(page_title='BreastDCEDL AI Lab · Predicción de respuesta pCR',page_icon=':material/biotech:',
                    layout='wide',initial_sidebar_state='auto')
 
 from app_components import home,explorer,prediction,validation,methodology
@@ -18,7 +18,7 @@ def main():
     if page=='home':home.render()
     elif page=='explorer':explorer.render()
     elif page=='predict':prediction.render()
-    elif page=='results':validation.render(st.session_state.workspace.results_campaign)
+    elif page=='results':validation.render()
     elif page=='method':methodology.render()
     notice()
 

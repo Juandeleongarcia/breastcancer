@@ -1,0 +1,12 @@
+# Solo hosting CPU; NO instalar sobre el entorno ROCm del PC de clase.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.0+cpu
+streamlit==1.66.1
+plotly==7.1.0
+numpy==2.5.3
+pandas==3.0.6
+scikit-learn==1.9.1
+Pillow==12.3.0
+matplotlib==3.11.2
+requests==2.34.2
+tzdata==2026.4

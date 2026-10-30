@@ -1,219 +1,237 @@
-# BreastDCEDL AI — base visual de Streamlit
+# BreastDCEDL AI Lab — aplicación final
 
-La aplicación permite explorar estudios DCE-MRI y revisar una campaña de
-validación cruzada compatible. No selecciona, compara ni ejecuta arquitecturas.
-La presentación está preparada para incorporar posteriormente **un único modelo**,
-cuando el usuario entregue los artefactos definitivos.
+Aplicación Streamlit real, con dos modalidades de inferencia CPU y cinco pantallas.
+Predice **pCR / no pCR tras tratamiento**, nunca cáncer / ausencia de cáncer.
+Es un prototipo universitario de investigación, sin validación clínica prospectiva.
 
-> Prototipo académico de investigación. No destinado a diagnóstico ni decisiones clínicas.
+## Inicio en Windows
 
-## Arranque en Windows
-
-Desde la raíz del proyecto, con su entorno existente:
+Desde la raíz del repositorio, con el entorno existente:
 
 ```powershell
 .\.env\Scripts\python.exe -m pip install -r requirements-app.txt
 .\.env\Scripts\python.exe -m pip check
-.\.env\Scripts\python.exe -m streamlit run app.py
+.\.env\Scripts\python.exe -m app_services.lab
+.\.env\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1
 ```
 
-Abrir <http://127.0.0.1:8501>. Detener con `Ctrl+C` en la terminal. Después de
-modificar código, reiniciar el servidor: el observador de archivos está desactivado
-para no vigilar las carpetas de entrenamiento.
+Abrir la URL que imprime Streamlit (normalmente `http://127.0.0.1:8501`). Detener
+con `Ctrl+C`. El observador de archivos está desactivado: reiniciar el servidor
+después de actualizar código. La revisión visual de esta entrega usa el puerto
+8502 para no interferir con servidores previos.
 
-Las dependencias nuevas son Streamlit 1.66.1 y Plotly 7.1.0. El archivo de requisitos
-de la app no instala ni sustituye PyTorch. El entorno local comprobado conserva
-Python 3.13.7 y PyTorch 2.14.0+cpu.
+`requirements-app.txt` solo añade interfaz al entorno PyTorch existente. **No
+instalar `deploy/requirements.txt` sobre el entorno ROCm de clase**: es un lock
+CPU exclusivamente para hosting. Se ha comprobado la existencia del wheel oficial
+PyTorch 2.14.0+cpu para Python 3.13 y Linux x86_64.
 
-## Arranque en Linux / ordenador de clase
+## Qué hace cada página
 
-Conservar el entorno ROCm que ya funciona:
-
-```bash
-conda activate cancer
-python -m pip install -r requirements-app.txt
-python -m pip check
-python -m streamlit run app.py
-```
-
-No instalar el lock CPU de Windows sobre el entorno de clase. Esta base visual
-no utiliza la GPU, carga pesos ni interactúa con entrenamientos en ejecución.
-La verificación realizada aquí corresponde a Windows; el arranque real en Linux
-debe comprobarse en ese equipo. El servidor escucha únicamente en `127.0.0.1`.
-
-## Navegación
-
-| Página | Funcionalidad actual |
+| Página | Función |
 |---|---|
-| Inicio | Problema pCR/no pCR, fases DCE-MRI, recorrido conceptual y acceso al explorador y resultados |
-| Explorador DCE-MRI | PRE/EARLY/LATE sincronizados, selección de corte, brillo/contraste, zoom y pila 3D esquemática opcional |
-| Predicción de pCR | Carga y revisión de estudios; botón de análisis deshabilitado y resultados pendientes |
-| Resultados y CV | Una campaña compatible: cinco folds, ROC, matrices, historiales y medias de pérdidas |
-| Cómo funciona una CNN | Esquema conceptual interactivo y explicaciones generales, sin filtros, dimensiones o parámetros de un modelo particular |
+| Inicio | Problema pCR, comparación interna real, AUC externo guardado y limitaciones visibles |
+| Probar el modelo | Una tripleta o múltiples cortes, edad/subtipo opcionalmente declarados, inferencia real y defensa 1–5 |
+| Explorador DCE-MRI | Fases sincronizadas, diferencias, zoom, contraste visual, pila axial relativa, superficie de intensidad y ROI temporal |
+| Arquitectura y método | Tensores y parámetros leídos de redes/configuraciones reales, rama clínica, folds, preprocesamiento y trazabilidad |
+| Resultados y validación | Comparación de cinco folds, OOF, curvas por época, medias/DE sin relleno y test externo independiente |
 
-No hay nombres de candidatos, selectores de arquitecturas, tablas de comparación,
-configuraciones de entrenamiento expuestas ni recuentos de parámetros en la UI.
-Los nombres internos de campañas no se presentan como títulos. La ruta local se
-introduce en un campo oculto para facilitar las demostraciones en pantalla.
+La modalidad de imágenes utiliza los cinco checkpoints de SPATIAL_SMALL; evita
+elegir un fold arbitrario y utiliza cada perfil de normalización correspondiente.
+La modalidad multimodal reproduce el ensemble final F13 de cinco checkpoints.
+No se atribuye al modelo de imagen el resultado externo del multimodal.
 
-## Pendientes explícitos
+## Demostración con las cinco muestras del profesor
 
-- Arquitectura definitiva.
-- Número de parámetros.
-- Checkpoint final.
-- Configuración de inferencia.
-- Métricas definitivas.
-- Resultados del test.
+1. Abrir **Probar el modelo**. El modo defensa está activo y muestra 1/5.
+2. Elegir modalidad. Para multimodal, introducir edad y subtipo. Si faltan datos,
+   puede usarse imagen únicamente. La imputación clínica exige declarar la ausencia
+   expresamente: nunca se muestra como un dato conocido.
+3. Cargar PRE, EARLY y LATE en los tres controles. PNG real, gris de 8 bits,
+   256 × 256; hasta 1 MiB por fase. No DICOM, RGB ni imágenes reescaladas por la app.
+4. Comprobar la validación y las imágenes. Pulsar **Analizar muestra**.
+5. Registrar la etiqueta real solo si el profesor ya la ha revelado.
+6. Pulsar **Siguiente muestra**: se limpian cargas, clínica y predicción anterior.
+7. Tras la quinta, descargar el CSV. Conservarlo antes de cerrar o recargar la sesión.
 
-No se descargan o cargan checkpoints. Las antiguas claves de configuración
-`models` e `inference`, incluso con `enabled: true`, no pueden activar la predicción.
-El bloque `integration` es una declaración de pendientes; tampoco activa código.
+El registro contiene número de muestra, timestamp de Madrid, modalidad, checksum,
+umbral, probabilidad, clase, número de modelos/cortes, dispositivo, tiempo y etiqueta
+revelada opcional. No contiene imágenes, nombres de archivos, identificadores,
+edad o subtipo. Todo permanece en memoria de la sesión, sin guardar entradas en disco.
+No hay caché de imágenes o predicciones de usuarios. Solo los modelos públicos
+inmutables se comparten mediante `st.cache_resource`, protegidos por un lock.
 
-## Cargar estudios en el explorador
+Una única tripleta representa **un corte**, no un paciente completo como en la
+evaluación de varios cortes. La app lo advierte. En modo avanzado se admite un
+paciente por carga con nombres `PACIENTE_z012_PRE.png`, `_EARLY.png` y `_LATE.png`,
+para todos sus índices z, o un ZIP. Se validan duplicados, fases, pacientes,
+dimensiones y rutas; el ZIP nunca se extrae al sistema. Límite: 256 cortes y 128 MiB.
 
-Se admite un paciente por carga: PNG de 8 bits en gris y 256 × 256 píxeles,
-con tripletas completas para cada índice de corte:
+El ejemplo integrado procede solo del train público autorizado. No tiene etiqueta
+ni datos clínicos precargados y no demuestra generalización. Ver `ATTRIBUTION.md`.
 
-```text
-PACIENTE_z012_PRE.png
-PACIENTE_z012_EARLY.png
-PACIENTE_z012_LATE.png
-```
+## Modelos y resultados auténticos
 
-Se aceptan varios PNG o un ZIP. La validación rechaza fases ausentes, duplicados,
-mezcla de pacientes, dimensiones o modos de color incompatibles y rutas peligrosas.
-Los archivos se procesan en memoria, sin extracción del ZIP ni envío a servicios
-externos. Límites: 128 MiB por estudio, 1 MiB por PNG y 256 cortes.
+La exportación administrativa descubre campañas completas y no diagnósticas en
+`models/CV9_*SPATIAL_SMALL*` y `models/phase13/CV13_*`. Reconoce una carpeta CV9
+duplicada al copiar desde clase, sin moverla. Si hay más de una campaña candidata,
+exige selección explícita: no elige por fecha ni por el mejor AUC.
 
-Los controles de brillo y contraste solo modifican la vista. La vista de diferencias
-temporales muestra PRE, EARLY − PRE y LATE − PRE de forma ilustrativa; no aplica el
-preprocesamiento del modelo ni calcula estadísticas con imágenes cargadas.
-El preprocesamiento de inferencia definitivo sigue pendiente.
+El informe externo debe referirse a la campaña multimodal seleccionada y los hashes
+de sus cinco checkpoints. Se verifican las métricas guardadas contra sus propias
+predicciones registradas, sin volver a cargar imágenes ni ejecutar el modelo sobre test.
 
-La pila 3D muestra como máximo 12 planos de referencia más el corte seleccionado.
-Usa orden de corte y coordenadas de píxel, sin atribuir orientación ni distancias
-físicas. **No es una reconstrucción anatómica.** La app tampoco puede comprobar
-que las tripletas aportadas constituyen el estudio anatómico original completo.
+El paquete de esta entrega confirma 72.593 parámetros por CNN de imagen y 72.600
+por CNN multimodal. Mejores épocas multimodales: 6, 2, 7, 5, 6.
+Las cifras que aparecen en la interfaz se leen del paquete verificado; no son
+constantes de demostración introducidas en las pantallas.
 
-La demostración del visor utiliza exclusivamente formas geométricas sintéticas,
-identificadas como tales. No crea un paciente real, probabilidades ni resultados.
+Cada miembro usa sus propios percentiles, medias/DE y transformador clínico de
+train. Se reutilizan `BreastDCEDataset`, `ImageTransform`, `ClinicalTransform`,
+`predict_patient` y `average_patients` originales. Se aplica `eval()` e
+`inference_mode()`. La media se hace primero por corte/paciente/modelo y después
+entre los cinco modelos, con pesos 0,20; nunca se promedian logits ni se votan clases.
 
-## Conectar resultados reales
+El dashboard distingue CV interna, OOF, test guardado y nuevas muestras. Destaca
+sensibilidad cero al umbral 0,50 en el test externo disponible. ROC AUC y matriz al
+umbral fijo no son medidas intercambiables. No hay un control para optimizar umbral
+con test ni un botón para repetir la evaluación externa.
 
-Abrir **Resultados y CV → Cargar resultados reales** e introducir la carpeta de
-una campaña compatible. No requiere seleccionar una arquitectura. Solo se lee
-una campaña cada vez; no existe una comparación entre modelos.
+## Paquete de inferencia y privacidad
 
-Para recordar la ruta, copiar `config/streamlit.example.json` a
-`models/app_config.json`, conservando cualquier archivo local anterior. Configurar
-únicamente `results.campaign` con la ruta real:
+`config/app_release.json` fija la URL HTTPS de release y el SHA256 del ZIP. La app
+usa primero `models/app_bundle/` si existe; en hosting descarga el paquete, verifica
+su hash y cada archivo, y lo conserva en caché local del servidor. El navegador
+no puede cambiar esa URL ni introducir rutas del sistema.
 
-```json
-{
-  "results": {"campaign": "/ruta/real/campana_cv"},
-  "integration": {
-    "enabled": false,
-    "architecture": null,
-    "parameters": null,
-    "checkpoint": "",
-    "inference_config": "",
-    "final_metrics": null,
-    "test_results": null
-  }
-}
-```
+El ZIP contiene 10 checkpoints **reducidos**, 10 historiales agregados, catálogo de
+curvas/métricas, atribución y tres PNG públicos de un corte de train. No contiene
+optimizador, scheduler, RNG, predicciones por paciente, etiquetas, CSV completos,
+identificadores ni validación privada del profesor. Pesa aproximadamente 2,9 MB.
+Los originales nunca se modifican. Se cargan mediante `weights_only=True`.
 
-También se admite un archivo externo:
-
-```powershell
-$env:BREASTDCEDL_APP_CONFIG = 'C:\ruta\app_config.json'
-```
-
-```bash
-export BREASTDCEDL_APP_CONFIG=/ruta/app_config.json
-```
-
-Las rutas relativas se resuelven desde el repositorio. Dejar la campaña vacía
-mantiene el dashboard preparado, sin inventar cifras ni curvas.
-
-El lector utiliza `campaign.json`, `template.json`, los CSV oficiales y derivados,
-el estado de cada fold y su último RUN (`history.csv`, configuración, resumen y
-predicciones por paciente). Reconoce el formato simplificado con `internals/`
-y formatos históricos compatibles mediante las utilidades existentes. No abre
-pesos ni escribe resúmenes en las campañas.
-
-Para copias procedentes de Linux, las rutas de RUN se remapean a la copia local
-conservando el nombre. Si falta la ruta original del CSV oficial, se admite el
-CSV del repositorio únicamente si coincide su hash guardado. El resto del contrato
-y las predicciones deben estar completos y ser verificables; no se crea información
-ausente para conseguir que una campaña aparezca como completa.
-
-## Cómo interpretar el dashboard
-
-- **ROC AUC medio y DE:** media de los folds completados y verificados. La DE es
-  muestral (`ddof=1`); con un solo fold permanece ausente. Menos de cinco folds se
-  identifica como validación provisional.
-- **OOF:** se construye solo con los cinco folds completos, pacientes únicos y
-  cobertura oficial íntegra. No se mezclan pacientes reservados para test.
-- **ROC y matriz:** se calculan a partir de probabilidades reales guardadas por
-  paciente. El umbral procede de la configuración guardada; no se optimiza en la UI.
-- **Loss:** `train_eval_loss` y validación usan pesos de final de época. Si un
-  historial antiguo solo tiene train loss online, se etiqueta explícitamente y
-  se representa con una línea discontinua.
-- **Medias por época:** se muestran todos los folds disponibles o solo las épocas
-  comunes a los cinco. Se informa cuántos folds contribuyen a cada punto. No se
-  rellenan épocas con ceros, valores repetidos ni interpolación; una sola
-  contribución no tiene banda de DE.
-- **Granularidad:** accuracy y AUC se identifican por paciente. La pérdida conserva
-  la granularidad por corte del entrenamiento y se etiqueta en el eje.
-
-Los resultados cargados constituyen evidencia aportada, no una elección automática
-del modelo final ni resultados de test. Los datos numéricos para comprobar el
-dashboard se crean solo en directorios temporales de los tests; no se muestran
-como métricas clínicas de demostración.
-
-## Estructura modular
-
-```text
-app.py                         # navegación de cinco páginas
-app_components/                # vistas y gráficos
-app_services/workspace.py      # configuración visual sin dependencias del modelo
-app_services/studies.py        # validación y lectura de estudios
-app_services/results.py        # lectura y agregación de una campaña
-app_services/                  # adaptadores técnicos reservados, sin conexión a la UI
-assets/                        # CSS e ilustración temporal propia
-.streamlit/config.toml         # tema, servidor local y límites
-config/streamlit.example.json   # resultados y pendientes, sin pesos
-tests/test_phase12_ui.py        # navegación y ausencia de detalles de candidatos
-tests/test_phase12_services.py  # contratos de entrada y cálculos
-```
-
-Los adaptadores experimentales anteriores permanecen internos y desconectados.
-La importación de la presentación no importa esos adaptadores ni construye CNN.
-Al elegir el modelo se conectará un único proveedor de inferencia, con su
-arquitectura, configuración exacta, estadísticas ajustadas en train y checkpoint
-fiable. Esa integración requerirá su propia verificación y no está habilitada
-mediante una casilla o selector de esta base visual.
-
-## Pruebas
+Si hay que regenerarlo, usar una salida nueva:
 
 ```powershell
-.\.env\Scripts\python.exe -B -m unittest discover -s tests -p "test_phase12_*.py" -v
+.\.env\Scripts\python.exe -m app_services.package --output models/app_bundle_v2
 ```
 
-```bash
-python -B -m unittest discover -s tests -p 'test_phase12_*.py' -v
+Con varias campañas, indicar sus nombres completos mediante `--image`,
+`--multimodal` y `--external`; `--models` cambia la raíz administrativa de búsqueda.
+Estos argumentos solo existen en la CLI del propietario, nunca en la interfaz web.
+Actualizar URL/hash únicamente al publicar una nueva versión revisada.
+
+## Despliegue elegido: Hugging Face Spaces con Docker
+
+La documentación actual de Hugging Face indica que crear Spaces con cómputo
+(incluido Docker) exige una cuenta con acceso a ese servicio; CPU Basic figura
+sin coste horario, pero no implica que cualquier cuenta gratuita pueda crear el
+Space. Comprobar la elegibilidad de la cuenta antes de contratar nada:
+[requisitos y recursos oficiales](https://huggingface.co/docs/hub/spaces-overview).
+No se contrata ni amplía ningún plan automáticamente.
+
+Comprobación del 30/10/2026 en la cuenta `Juaandeleoon`: la pantalla de creación
+mostraba Docker deshabilitado y el aviso de suscripción PRO. El despliegue queda
+pendiente de que el titular habilite ese servicio o elija la alternativa inferior.
+No se ha contratado ningún plan ni creado un Space vacío como sustituto de la app.
+
+1. Iniciar sesión en https://huggingface.co y crear un Space **Docker / Blank**,
+   con un nombre como `breastdcedl-ai-lab`, acceso público y CPU Basic si está disponible.
+   No seleccionar Gradio o Static para esta aplicación Streamlit.
+2. Preparar una carpeta de código autorizada, independiente del repositorio completo:
+
+```powershell
+.\.env\Scripts\python.exe deploy/prepare_space.py --output models/space_upload_final
 ```
 
-Las pruebas usan estudios geométricos y campañas pequeñas en carpetas temporales.
-Verifican navegación, cargas válidas e inválidas, selección sincronizada, pila 3D,
-predicción siempre deshabilitada, ausencia de identidades de modelos en pantallas,
-lectura sin escrituras, cobertura de folds, OOF y medias sin relleno.
+3. Subir el **contenido** de `models/space_upload_final/` a la raíz del Space. El script
+   coloca `Dockerfile` y `README.md` con `sdk: docker` y `app_port: 7860` en la raíz.
+   No subir `models/`, `metadata/`, `breastdcedl/`, backups, el entorno ni este repo entero.
+4. Puede utilizarse el panel **Files → Add file → Upload files**, o la CLI oficial:
 
-Cuatro pruebas de arquitecturas/checkpoints permanecen aplazadas y se indican
-como `skipped`. No activar `BREASTDCEDL_TEST_CHECKPOINTS` en esta fase visual.
-No se ejecutan entrenamientos ni se abren checkpoints históricos.
+```powershell
+hf auth login
+hf upload Juaandeleoon/breastdcedl-ai-lab models/space_upload_final . --repo-type space
+```
 
-Los archivos originales del proyecto, particiones, preprocesamiento y resultados
-se conservan. Las copias de seguridad y registros de verificación son locales,
-dentro de `backups/`, excluido por Git. No se ha hecho commit ni push de esta fase.
+   `hf` forma parte de `huggingface_hub`; instalarlo en una herramienta/entorno
+   separado si hace falta. No enviar tokens por chat ni escribirlos en archivos
+   del repositorio. Ver [CLI oficial](https://huggingface.co/docs/huggingface_hub/en/guides/cli).
+5. Esperar al build. El contenedor instala el lock CPU y ejecuta primero
+   `python -m app_services.lab`: si el paquete o los pesos no están listos, falla
+   antes de abrir una app aparentemente válida. Después escucha en 0.0.0.0:7860.
+6. Comprobar que el Space esté **Running** y abra la app con modelos verificados.
+   Probar el ejemplo público, no el test externo. Comprobar descarga del CSV.
+7. Compartir la URL **real que asigne Hugging Face**, tanto su página `/spaces/...`
+   como el dominio `.hf.space` que muestre la plataforma. No asumir que una URL
+   construida por nombre ya está desplegada. Verificarla desde otra sesión antes
+   de la defensa. No depende del ordenador del estudiante.
+
+El Dockerfile usa una lista explícita de carpetas de código y excluye metadata,
+datasets, modelos originales y ficheros privados. La descarga de los artefactos
+necesita conectividad HTTPS al release de GitHub. Los datos de entrada del profesor
+solo se envían a la sesión del servidor de la app, nunca a servicios de inferencia
+terceros. La telemetría de Streamlit está desactivada.
+
+Referencia: [Docker Spaces](https://huggingface.co/docs/hub/spaces-sdks-docker).
+No se ha ejecutado Docker localmente si el motor no está instalado. La autenticación
+en HF y el build real son pasos distintos de la verificación local Windows CPU.
+
+### Despliegue elegido: Streamlit Community Cloud
+
+Tras comprobar el bloqueo de Docker en Hugging Face, el titular ha elegido
+Streamlit Community Cloud. Utilizar
+repositorio `Juandeleongarcia/breastcancer`, rama `main`, entrypoint **deploy/app.py**
+y Python 3.13. Ese directorio contiene el lock CPU que tiene prioridad sobre los
+requisitos históricos del repositorio. No usar el requirements de entrenamiento.
+La app descarga el mismo paquete verificado. Requiere iniciar sesión y conectar
+la cuenta de GitHub; no se afirma que esté publicada hasta verificar su URL.
+
+[Despliegue oficial](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy)
+y [prioridad de requisitos](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/app-dependencies).
+La opción Docker usa un árbol más reducido porque Community Cloud clona el repo.
+
+Pasos exactos desde el navegador:
+
+1. Abrir https://share.streamlit.io/ e iniciar sesión personalmente. Revisar y
+   aceptar sus condiciones y los permisos de GitHub en las páginas del proveedor;
+   nunca enviar credenciales por chat. Conectar únicamente el repositorio necesario
+   si el proveedor permite limitar el alcance.
+2. Pulsar **Create app / Deploy a public app from GitHub**.
+3. Repositorio: `Juandeleongarcia/breastcancer`; branch: `main`;
+   main file path: `deploy/app.py`.
+4. En **Advanced settings**, elegir **Python 3.13**. No hacen falta secrets para
+   este paquete público verificado. Puede solicitarse un subdominio disponible,
+   pero su URL solo se considera publicada cuando la plataforma la confirme.
+5. Pulsar **Deploy**. Revisar el log de instalación y esperar al estado activo.
+6. Comprobar las cinco páginas y predecir con el ejemplo público en modalidad de
+   imágenes. Confirmar que no aparece ningún error de descarga/checksum/modelos.
+7. Abrir la URL real desde otra sesión y conservarla para la defensa. No cargar
+   muestras privadas para comprobar el despliegue. Las entradas de una sesión se
+   envían al servidor de Community Cloud para inferencia en memoria.
+
+Si hay un error de versión de Python o dependencia, revisar el log y corregir la
+configuración de hosting; no modificar pesos ni instalar requisitos ROCm allí.
+
+## QA y límites de la comprobación
+
+Verificación local final: **35 pruebas superadas, cero fallos y cero omitidas**,
+incluidas las pruebas opcionales con pesos reales (`BREASTDCEDL_TEST_CHECKPOINTS=1`).
+Se han comprobado sin cambios por SHA256 los **566 archivos históricos** inventariados.
+Docker no se ha ejecutado localmente porque este ordenador no dispone del motor.
+
+```powershell
+.\.env\Scripts\python.exe -B -m unittest discover -s tests -p test_app_final.py -v
+.\.env\Scripts\python.exe -B -m unittest discover -s tests -p test_phase12_ui.py -v
+```
+
+Se han verificado entradas ausentes/duplicadas/corruptas/RGB/dimensiones/rutas,
+clínica ausente y desconocida, los diez checkpoints reales en CPU, repetibilidad,
+coincidencia numérica con inferencia original sobre un caso público de train,
+agregación/ensemble, cinco muestras consecutivas, limpieza, CSV y 3D de uno/varios cortes.
+Las pruebas no reentrenan modelos ni ejecutan el test externo. Los artefactos
+históricos y las fuentes protegidas se contrastan mediante hashes antes/después.
+
+Las nuevas predicciones no están cacheadas. La caché de recursos solo conserva
+modelos públicos con checksum. Una recarga completa de la sesión puede perder
+el registro: descargar el CSV antes de cerrar. Cinco muestras no bastan para
+estimar rendimiento clínico. El prototipo no decide tratamientos ni evita cirugía.

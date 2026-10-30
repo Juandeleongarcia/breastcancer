@@ -1,5 +1,28 @@
 # breastcancer
 
+## Aplicación final · BreastDCEDL AI Lab
+
+Interfaz Streamlit con inferencia real CPU, comparación de CNN de imagen y
+multimodal, explorador 2D/3D y demostración de cinco muestras por sesión.
+Lee el test externo ya guardado: no lo vuelve a evaluar ni ajusta el umbral.
+
+```powershell
+.\.env\Scripts\python.exe -m pip install -r requirements-app.txt
+.\.env\Scripts\python.exe -m app_services.lab
+.\.env\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1
+```
+
+Los pesos se distribuyen como un paquete de inferencia reducido con SHA256 fijo,
+fuera del historial Git normal. No se publican CSV con verdad terreno ni validación
+privada. El ejemplo público de train conserva atribución y licencia CC BY-NC 4.0.
+
+Ver [guía de uso y despliegue HF Spaces](STREAMLIT_GUIA.md),
+[auditoría del enunciado](documentation/APP_FINAL_AUDITORIA.md) y
+[atribución de datos](ATTRIBUTION.md). El despliegue utiliza `deploy/Dockerfile`
+y requisitos CPU separados, sin sustituir PyTorch ROCm del ordenador de clase.
+
+El resto de este documento conserva las instrucciones históricas de entrenamiento.
+
 CNN 2D propia para predecir **pCR/no pCR**, no presencia/ausencia de cáncer.
 Entrada baseline: PRE, EARLY−PRE y LATE−PRE; selección por **ROC AUC de paciente**.
 

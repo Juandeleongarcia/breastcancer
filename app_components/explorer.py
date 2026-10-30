@@ -86,7 +86,7 @@ def viewer(study,enable_3d=False):
     if st.toggle('Ver cambios temporales de intensidad',value=True,key='show_channels'):
         pre,early,late = study.phases[position].astype(np.float32)/255.
         values = np.stack([pre,early-pre,late-pre])
-        st.info('Vista temporal ilustrativa, sin clipping ni normalización de un modelo. El preprocesamiento definitivo queda pendiente.')
+        st.caption('Diferencias temporales calculadas con las intensidades originales. Esta vista no modifica el clipping ni la normalización utilizados por los modelos.')
         titles = ['PRE','EARLY − PRE','LATE − PRE']
         for column,value,title in zip(st.columns(3),values,titles):
             with column:
@@ -102,22 +102,42 @@ def viewer(study,enable_3d=False):
         else:
             zoom_dialog(values[choices.index(selected)-3],selected,True)
     if enable_3d:
-        st.subheader('La pila de cortes, desde otra perspectiva')
-        st.caption('Representación esquemática en 3D. Sin espaciado, orientación o unidades físicas; no es una reconstrucción anatómica.')
-        if st.toggle('Activar pila 3D',key='enable_3d'):
+        st.subheader('Representación 3D · opcional')
+        st.caption('Varios cortes: planos ordenados por su índice axial relativo. Un corte: altura matemática de intensidades. No se inventan orientación, espaciado milimétrico, volúmenes o máscaras.')
+        if st.toggle('Activar visualización 3D',key='enable_3d'):
             phase = st.selectbox('Fase del visor 3D',['PRE','EARLY','LATE'],key='volume_phase')
             try:
-                figure,count = charts.slice_stack(study,['PRE','EARLY','LATE'].index(phase),position)
-                plot(figure,'stack_3d')
-                st.caption(f'{count} de {n} planos representados; el borde turquesa identifica el corte seleccionado. '
-                           'Rotación y zoom disponibles. No se interpolan cortes ni se atribuyen distancias anatómicas.')
+                if n>1:
+                    figure,count = charts.slice_stack(study,['PRE','EARLY','LATE'].index(phase),position)
+                    plot(figure,'stack_3d')
+                    st.caption(f'{count} de {n} planos representados; borde turquesa: corte seleccionado. Coordenadas relativas, sin mm ni interpolación de cortes.')
+                else:
+                    plot(charts.intensity_surface(study,['PRE','EARLY','LATE'].index(phase),position),'surface_3d')
+                    st.caption('Un único corte no permite reconstruir anatomía 3D. La altura representa intensidad, no profundidad física.')
             except (ValueError,RuntimeError) as error:
-                st.info('La pila 3D no está disponible en este entorno. La vista 2D sigue funcionando. '+str(error))
+                st.info('La visualización 3D no está disponible en este entorno. La vista 2D sigue funcionando. '+str(error))
+    st.subheader('Explorar el realce temporal de una región')
+    a,b,c=st.columns(3)
+    x=a.number_input('Centro X (píxel)',0,255,128,key='temporal_x')
+    y=b.number_input('Centro Y (píxel)',0,255,128,key='temporal_y')
+    radius=c.slider('Radio de región (píxeles)',0,32,8,key='temporal_radius')
+    plot(charts.temporal_curve(study,position,int(x),int(y),int(radius)),'temporal_curve')
+    st.caption('Se representan tres puntos temporales, sin tiempos físicos ni interpolación fisiológica. La región es una selección manual, no una segmentación tumoral. Brillo y contraste no afectan a esta curva.')
 
 
 def render():
     section('EXPLORACIÓN TEMPORAL','Explorador DCE-MRI','Tres fases sincronizadas. Una lectura espacial y temporal del estudio.')
     upload_study()
+    if st.session_state.catalog is not None and st.button('Explorar ejemplo público de train',key='explorer_example'):
+        from app_services.lab import public_example
+        st.session_state.study=public_example(st.session_state.bundle_root)
+        st.session_state.slice_pos=0;st.session_state.demo_mode=False
+    if st.session_state.study is None and st.session_state.catalog is not None and 'demo_mode' not in st.session_state:
+        from app_services.lab import public_example
+        st.session_state.study=public_example(st.session_state.bundle_root)
+        st.session_state.demo_mode=False
+    if st.session_state.catalog is not None:
+        st.caption('Ejemplo público autorizado: BreastDCEDL MinCrop · CC BY-NC 4.0 · Fridman et al. · doi:10.5281/zenodo.18114231. No se suministra etiqueta.')
     study = st.session_state.study
     demo = st.toggle('Demostración sintética del visor',value=study is None,key='demo_mode')
     if demo:
