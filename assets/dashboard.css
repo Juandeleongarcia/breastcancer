@@ -50,3 +50,10 @@ button{border-radius:9px!important}
 .b-card,.b-step{transition:transform .18s ease,border-color .18s ease}
 .b-card:hover{transform:translateY(-2px);border-color:#397276}
 @media(prefers-reduced-motion:reduce){.b-card,.b-step{transition:none}.b-card:hover{transform:none}}
+.b-card .value,.b-panel p,.b-notice{overflow-wrap:anywhere}
+.b-card{height:100%;box-sizing:border-box}
+[data-testid="stTabs"] [role="tablist"]{overflow-x:auto;flex-wrap:nowrap}
+[data-testid="stTabs"] [role="tab"]{white-space:nowrap}
+[data-testid="stAlert"] p,[data-testid="stAlert"] li{color:#E8EEF5}
+@media(max-width:950px){[data-testid="stHorizontalBlock"]{flex-wrap:wrap!important}[data-testid="stColumn"]{min-width:100%!important;flex:1 1 100%!important}}
+@media(max-width:750px){.b-card{min-height:105px}.b-hero h1{font-size:30px!important}.b-topline .crumb{letter-spacing:1px}}

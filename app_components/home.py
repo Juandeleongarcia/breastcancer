@@ -1,6 +1,6 @@
 import streamlit as st
 
-from app_components.layout import cards, goto
+from app_components.layout import cards, goto, identity
 from app_services.workspace import ROOT
 
 
@@ -13,7 +13,7 @@ def render():
                 'a partir de imágenes dinámicas de resonancia de mama. Una herramienta para investigar, visualizar y comprender.</p></div>')
         a,b = st.columns([1,1])
         a.button('Probar el modelo',icon=':material/biotech:',type='primary',width='stretch',on_click=goto,args=('predict',),key='home_predict')
-        b.button('Explorar las resonancias',icon=':material/view_in_ar:',width='stretch',on_click=goto,args=('explorer',),key='home_explore')
+        b.button('Explorar DCE-MRI',icon=':material/view_in_ar:',width='stretch',on_click=goto,args=('explorer',),key='home_explore')
         st.caption('CNN 2D propias · sin transfer learning · evaluación por paciente')
     with right:
         with st.container(border=True):
@@ -25,7 +25,9 @@ def render():
            ('Protocolo','5 folds','Validación cruzada interna'),('Comparación','2 modalidades','Imagen / imagen + clínica'),
            ('AUC externo',f"{catalog['external']['metrics']['auc']:.4f}" if catalog else '—','Ensemble multimodal · test guardado')])
     if catalog:
-        st.caption('Trabajo universitario de Ingeniería Matemática · CNN 2D entrenadas desde cero.')
+        person=identity()
+        st.caption(f"{person['author']} · {person['university']} · {person['degree']}")
+        st.caption(person['nature']+' · CNN 2D entrenadas desde cero.')
         st.subheader('Dos fuentes de información, una evaluación trazable')
         a,b=st.columns(2)
         for col,kind,title in [(a,'image','SPATIAL_SMALL · imágenes'),(b,'multimodal','SPATIAL_SMALL multimodal')]:
@@ -34,9 +36,13 @@ def render():
                 st.html(f'<div class="b-panel"><h3>{title}</h3><p>AUC CV: <strong>{metric["auc_mean"]:.4f} ± {metric["auc_std"]:.4f}</strong> · DE muestral de cinco folds.<br>{entry["members"][0]["parameters"]:,} parámetros por red. Cinco checkpoints, cada uno con su preprocesamiento.</p></div>')
         metrics=catalog['external']['metrics']
         if metrics['recall']==0:st.warning('Test externo · sensibilidad 0 % al umbral 0,50. La discriminación ROC AUC y la clasificación binaria son aspectos distintos; esta limitación se muestra sin ocultarla.')
+        st.info('Conclusión experimental: la modalidad multimodal presenta mayor AUC interna en estas campañas. '
+                'La sensibilidad externa al umbral original sigue siendo insuficiente; esto no demuestra utilidad clínica.')
     st.write('')
     st.subheader('De la imagen a una estimación interpretable')
     st.caption('La predicción parte de la resonancia inicial; la respuesta real se conoce después del tratamiento y la evaluación patológica.')
+    st.caption('PRE, EARLY y LATE son tres adquisiciones temporales del mismo tejido, no colores RGB. '
+               'Las convoluciones buscan patrones espaciales y cambios de realce; se promedian los cortes por paciente y después los cinco modelos.')
     steps = [('01','DCE-MRI inicial','PRE · EARLY · LATE'),('02','Preprocesamiento','Clipping + estadísticas de train por fold'),
              ('03','CNN propia','Características espaciales'),('04','Por corte','Probabilidades estimadas'),
              ('05','Por paciente','Media de los cortes aportados')]

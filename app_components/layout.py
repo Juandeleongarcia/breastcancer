@@ -1,5 +1,6 @@
 """Identidad visual, navegación, estado vacío y conexiones locales."""
 from html import escape
+import json
 
 import streamlit as st
 
@@ -104,6 +105,11 @@ def empty(title,text,icon='◇'):
 
 def notice():
     st.html('<div class="b-notice">'+escape(NOTICE)+'<br>Las puntuaciones estiman una respuesta; no constituyen un diagnóstico ni una probabilidad clínica calibrada.</div>')
+    st.caption(' · '.join(identity().values()))
+
+
+def identity():
+    return json.loads((ROOT/'config/app_identity.json').read_text(encoding='utf-8'))
 
 
 def plot(figure,key):
@@ -131,4 +137,24 @@ def next_sample():
     clear_input();st.session_state.study=None
     for key in list(st.session_state):
         if key.startswith(('input_','upload_','reveal_')) and key not in ['input_nonce','input_study']:
+            st.session_state.pop(key,None)
+
+
+def choose_public_example():
+    """Acción explícita: ejemplo público y modalidad de imagen, sin clínica inventada."""
+    nonce=st.session_state.input_nonce
+    clear_input()
+    st.session_state[f'input_source_{nonce}']='Ejemplo público autorizado'
+    st.session_state[f'input_kind_{nonce}']='image'
+
+
+def reset_defence():
+    """Solo memoria de esta sesión; no toca campañas, ficheros ni recursos compartidos."""
+    if not st.session_state.get('confirm_reset_defence',False):return
+    st.session_state.defence=Defence()
+    st.session_state.input_nonce+=1
+    clear_input();clear_study()
+    st.session_state.defence_mode=True
+    for key in list(st.session_state):
+        if (key.startswith(('input_','upload_','reveal_')) and key not in ['input_nonce','input_study']) or key=='confirm_reset_defence':
             st.session_state.pop(key,None)

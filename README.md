@@ -13,13 +13,20 @@ Lee el test externo ya guardado: no lo vuelve a evaluar ni ajusta el umbral.
 ```
 
 Los pesos se distribuyen como un paquete de inferencia reducido con SHA256 fijo,
-fuera del historial Git normal. No se publican CSV con verdad terreno ni validación
-privada. El ejemplo público de train conserva atribución y licencia CC BY-NC 4.0.
+fuera del historial Git normal. El paquete de la app no contiene CSV con verdad
+terreno ni validación privada. **Auditoría final:** este repositorio de entrenamiento
+ya tiene CSV históricos de metadata versionados. No se han retirado ni reescrito;
+el despliegue se prepara desde un paquete de código limpio para un repositorio
+separado, sin esos CSV. El ejemplo público conserva atribución y licencia CC BY-NC 4.0.
 
-Ver [guía de uso y despliegue HF Spaces](STREAMLIT_GUIA.md),
+Ver [guía de uso y despliegue](STREAMLIT_GUIA.md), [guía del repositorio de app limpio](deploy/README_APP.md),
 [auditoría del enunciado](documentation/APP_FINAL_AUDITORIA.md) y
 [atribución de datos](ATTRIBUTION.md). El despliegue utiliza `deploy/Dockerfile`
 y requisitos CPU separados, sin sustituir PyTorch ROCm del ordenador de clase.
+
+Entrega final: [matriz de cumplimiento, pruebas y limitaciones](documentation/ENTREGA_FINAL_APP.md).
+Autor: **Juan de León García · Universidad Alfonso X el Sabio (UAX) · Grado en
+Ingeniería Matemática**. Trabajo académico universitario de investigación.
 
 El resto de este documento conserva las instrucciones históricas de entrenamiento.
 

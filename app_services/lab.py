@@ -9,6 +9,7 @@ import re
 import stat
 import threading
 import time
+from tempfile import TemporaryDirectory
 from zipfile import ZipFile
 
 import numpy as np
@@ -73,19 +74,24 @@ def package_root():
     cache=ROOT/'models/.app_cache';cache.mkdir(parents=True,exist_ok=True)
     target=cache/expected
     if (target/'catalog.json').is_file():return target
-    response=requests.get(url,timeout=(10,60),stream=True)
-    response.raise_for_status();data=bytearray()
-    for chunk in response.iter_content(1024*1024):
-        data.extend(chunk)
-        if len(data)>64*1024*1024:raise ValueError('Descarga de artefactos demasiado grande')
-    # Carpeta exclusiva por intento; no se escribe dentro de campañas históricas.
-    from uuid import uuid4
-    temporary=cache/(expected+'_'+uuid4().hex[:8])
-    extract_package(bytes(data),expected,temporary)
-    try:temporary.rename(target)
-    except OSError:
-        if (target/'catalog.json').is_file():return target
-        raise
+    data=bytearray()
+    with requests.get(url,timeout=(10,60),stream=True) as response:
+        response.raise_for_status()
+        for chunk in response.iter_content(1024*1024):
+            data.extend(chunk)
+            if len(data)>64*1024*1024:raise ValueError('Descarga de artefactos demasiado grande')
+    # Solo se limpia el temporal recién creado dentro de la caché, nunca campañas.
+    with TemporaryDirectory(prefix='bundle_',dir=cache) as temporary:
+        parent=Path(temporary).resolve()
+        if not parent.is_relative_to(cache.resolve()):raise ValueError('Temporal fuera de la caché')
+        extracted=extract_package(bytes(data),expected,parent/'payload')
+        read_catalog(extracted)  # Verificar antes de hacer visible el paquete completo.
+        try:extracted.rename(target)
+        except OSError:
+            if (target/'catalog.json').is_file():
+                read_catalog(target)
+                return target
+            raise
     return target
 
 
@@ -167,6 +173,8 @@ def predict(study,resource,clinical_values=None):
     if resource.device.type=='cuda':torch.cuda.synchronize(resource.device)
     elapsed=time.perf_counter()-began
     probability=float(mean.probability)
+    if not np.isclose(probability,np.mean([frames[f].probability.iloc[0] for f in range(5)]),rtol=0,atol=1e-12):
+        raise ValueError('La agregación no coincide con la media de los cinco miembros')
     return dict(patient_probability=probability,no_pcr_probability=1-probability,prediction=int(probability>=.5),
         threshold=.5,checksum=resource.checksum,kind=resource.kind,model=LABELS[resource.kind],
         n_models=5,n_slices=len(study.slice_indices),device=str(resource.device),seconds=elapsed,

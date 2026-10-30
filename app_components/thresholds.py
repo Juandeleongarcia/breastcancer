@@ -30,26 +30,25 @@ def render(catalog):
            ('AUC OOF',f"{report['original']['auc']:.4f}",'No cambia al mover el umbral')])
     threshold=st.slider('Umbral para explorar OOF',.05,.95,float(recommended),.01,key='oof_threshold')
     selected=next(row for row in report['thresholds'] if abs(row['threshold']-threshold)<1e-10)
-    rows=[dict(comparacion=label,**{key:row[key] for key in
-          ['threshold','sensitivity','specificity','precision','f1','balanced_accuracy','accuracy','youden']})
-          for label,row in [('Original',report['original']),('Recomendado OOF',report['recommended']),('Explorado',selected)]]
+    rows=[]
+    for key,label in [('threshold','Umbral'),('sensitivity','Sensibilidad'),('specificity','Especificidad'),
+                      ('precision','Precisión pCR'),('f1','F1'),('balanced_accuracy','Balanced accuracy'),
+                      ('accuracy','Accuracy'),('youden','Youden')]:
+        fmt=(lambda v:f'{v:.4f}') if key in ['threshold','youden'] else (lambda v:f'{v:.2%}')
+        rows.append(dict(Métrica=label,Original=fmt(report['original'][key]),
+                         Recomendado=fmt(report['recommended'][key]),Explorado=fmt(selected[key])))
     st.dataframe(pd.DataFrame(rows),hide_index=True,width='stretch')
-    for col,label,row in zip(st.columns(3),['Original 0,50',f'Recomendado {recommended:.2f}',f'Explorado {threshold:.2f}'],
-                             [report['original'],report['recommended'],selected]):
+    for col,label,row in zip(st.columns(2),['Original 0,50',f'Recomendado {recommended:.2f}'],
+                             [report['original'],report['recommended']]):
         with col:
             st.caption(label+' · pacientes OOF')
             plot(charts.confusion_figure(row),'oof_cm_'+label)
-    fig=go.Figure()
-    for metric,label in [('sensitivity','Sensibilidad'),('specificity','Especificidad'),
-                         ('precision','Precisión pCR'),('f1','F1'),('balanced_accuracy','Balanced accuracy'),('youden','Youden')]:
-        fig.add_scatter(x=[r['threshold'] for r in report['thresholds']],
-                        y=[r[metric] for r in report['thresholds']],name=label,mode='lines')
-    fig.add_vline(x=.5,line_dash='dot',annotation_text='Original 0,50')
-    fig.add_vline(x=recommended,line_dash='dash',line_color=charts.TEAL,annotation_text=f'OOF {recommended:.2f}')
-    fig.add_vline(x=threshold,line_color=charts.WHITE)
-    charts.style(fig,450,'Métricas por umbral · desarrollo OOF')
-    fig.update_xaxes(title='Umbral pCR',range=[.05,.95]);fig.update_yaxes(title='Valor de la métrica',range=[-1,1])
-    plot(fig,'oof_threshold_curves')
+    if threshold not in [.5,recommended]:
+        with st.expander(f'Matriz del umbral explorado {threshold:.2f}',expanded=True):
+            plot(charts.confusion_figure(selected),'oof_cm_selected')
+    st.caption(charts.confusion_legend())
+    plot(charts.threshold_curves(report,threshold),'oof_threshold_curves')
+    plot(charts.threshold_curves(report,threshold,youden=True),'oof_youden_curve')
     st.caption('Rejilla fija 0,05–0,95, paso 0,01 (91 umbrales). Youden = sensibilidad + especificidad − 1. '
                'Empates: más próximo a 0,50 y después el mayor. Positivo si probabilidad ≥ umbral. '
                'La clasificación de la demostración se configura aparte; este control no la modifica.')

@@ -5,7 +5,7 @@ from io import BytesIO
 from pathlib import PurePosixPath
 import re
 import stat
-from zipfile import ZipFile, BadZipFile
+from zipfile import ZipFile, BadZipFile, ZIP_STORED, ZIP_DEFLATED
 
 import numpy as np
 from PIL import Image, UnidentifiedImageError
@@ -64,7 +64,7 @@ def study_from_files(files):
                 if image.format != "PNG" or image.mode != "L" or image.size != (256, 256):
                     raise ValueError("Se requieren PNG de 8 bits en gris (L), de 256 × 256; no RGB ni 16 bits")
                 entry[phase] = np.array(image, dtype=np.uint8)
-        except (UnidentifiedImageError, OSError) as error:
+        except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
             raise ValueError("No se pudo leer un PNG válido") from error
     for index, entry in slices.items():
         missing = set(PHASES)-entry.keys()
@@ -90,13 +90,15 @@ def study_from_uploads(files):
                 values = []
                 for entry in entries:
                     _safe_name(entry.filename)
+                    if entry.compress_type not in [ZIP_STORED,ZIP_DEFLATED]:
+                        raise ValueError('Usar un ZIP estándar sin compresión o con compresión Deflate')
                     if stat.S_ISLNK(entry.external_attr >> 16) or entry.flag_bits & 1:
                         raise ValueError("No se admiten enlaces ni archivos cifrados en el ZIP")
                     if entry.file_size > 1024*1024:
                         raise ValueError("Un archivo del ZIP supera 1 MiB")
                     values.append((entry.filename, archive.read(entry)))
                 return study_from_files(values)
-        except BadZipFile as error:
+        except (BadZipFile,RuntimeError,NotImplementedError) as error:
             raise ValueError("El archivo ZIP no es válido") from error
     if any(name.lower().endswith(".zip") for name, _ in files):
         raise ValueError("Cargar un único ZIP o una selección de PNG, sin mezclarlos")

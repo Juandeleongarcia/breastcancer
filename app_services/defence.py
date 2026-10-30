@@ -3,6 +3,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import hashlib
 import json
+from uuid import uuid4
 
 import pandas as pd
 
@@ -10,6 +11,7 @@ import pandas as pd
 class Defence:
     def __init__(self):
         self.slot=1;self.records=[];self.seen=set();self.current=None
+        self.session_id=uuid4().hex
 
     def input_key(self,study,kind,clinical):
         return hashlib.sha256((study.fingerprint+kind+json.dumps(clinical,sort_keys=True)).encode()).hexdigest()
@@ -23,7 +25,8 @@ class Defence:
             probabilidad_pcr=result['patient_probability'],clase_predicha=result['prediction'],
             modelos=result['n_models'],cortes=result['n_slices'],dispositivo=result['device'],
             segundos=result['seconds'],etiqueta_real=None,
-            origen_umbral=result.get('threshold_policy','Original 0,50'))
+            origen_umbral=result.get('threshold_policy','Original 0,50'),
+            sesion_id=self.session_id,ejecucion_id=uuid4().hex)
         self.records.append(row);self.seen.add(study.fingerprint);self.current=key
         return row
 

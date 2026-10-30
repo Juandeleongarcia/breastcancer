@@ -15,6 +15,11 @@ Desde la raíz del repositorio, con el entorno existente:
 .\.env\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1
 ```
 
+Para la entrega final se ha preparado además un **repositorio de app separado**:
+ver [README del paquete limpio](deploy/README_APP.md) y [matriz de cumplimiento y
+pruebas](documentation/ENTREGA_FINAL_APP.md). Su arranque limpio usa Python 3.13,
+un venv nuevo y deploy/requirements.txt. No depende del entorno de entrenamiento.
+
 Abrir la URL que imprime Streamlit (normalmente `http://127.0.0.1:8501`). Detener
 con `Ctrl+C`. El observador de archivos está desactivado: reiniciar el servidor
 después de actualizar código. La revisión visual de esta entrega usa el puerto
@@ -43,6 +48,8 @@ No se atribuye al modelo de imagen el resultado externo del multimodal.
 ## Demostración con las cinco muestras del profesor
 
 1. Abrir **Probar el modelo**. El modo defensa está activo y muestra 1/5.
+   Para la primera prueba, pulsar **Probar con un ejemplo público**: carga la
+   tripleta autorizada y selecciona imágenes, sin inventar valores clínicos.
 2. Elegir modalidad. Para multimodal, introducir edad y subtipo. Si faltan datos,
    puede usarse imagen únicamente. La imputación clínica exige declarar la ausencia
    expresamente: nunca se muestra como un dato conocido.
@@ -60,6 +67,9 @@ El registro contiene número de muestra, timestamp de Madrid, modalidad, checksu
 umbral, probabilidad, clase, número de modelos/cortes, dispositivo, tiempo y etiqueta
 revelada opcional. No contiene imágenes, nombres de archivos, identificadores,
 edad o subtipo. Todo permanece en memoria de la sesión, sin guardar entradas en disco.
+Los identificadores de sesión/ejecución añadidos son UUID técnicos aleatorios,
+sin relación con pacientes. El reinicio exige confirmación y borra solo esa sesión;
+descargar el CSV antes de utilizarlo.
 No hay caché de imágenes o predicciones de usuarios. Solo los modelos públicos
 inmutables se comparten mediante `st.cache_resource`, protegidos por un lock.
 
@@ -220,8 +230,11 @@ en HF y el build real son pasos distintos de la verificación local Windows CPU.
 ### Despliegue elegido: Streamlit Community Cloud
 
 Tras comprobar el bloqueo de Docker en Hugging Face, el titular ha elegido
-Streamlit Community Cloud. Utilizar
-repositorio `Juandeleongarcia/breastcancer`, rama `main`, entrypoint **deploy/app.py**
+Streamlit Community Cloud. Tras la auditoría de privacidad se ha elegido preparar
+un repositorio separado para la app: repositorio público **[Juandeleongarcia/breastdcedl-ai-lab](https://github.com/Juandeleongarcia/breastdcedl-ai-lab)**,
+creado y publicado tras la autorización final del autor. No desplegar copiando indiscriminadamente el repo de entrenamiento:
+ya contiene CSV históricos de metadata versionados, que se conservan sin cambios.
+Usar el paquete generado con `--target streamlit`, rama `main`, entrypoint **deploy/app.py**
 y Python 3.13. Ese directorio contiene el lock CPU que tiene prioridad sobre los
 requisitos históricos del repositorio. No usar el requirements de entrenamiento.
 La app descarga el mismo paquete verificado. Requiere iniciar sesión y conectar
@@ -238,7 +251,7 @@ Pasos exactos desde el navegador:
    nunca enviar credenciales por chat. Conectar únicamente el repositorio necesario
    si el proveedor permite limitar el alcance.
 2. Pulsar **Create app / Deploy a public app from GitHub**.
-3. Repositorio: `Juandeleongarcia/breastcancer`; branch: `main`;
+3. Repositorio: el nuevo repositorio limpio autorizado; branch: `main`;
    main file path: `deploy/app.py`.
 4. En **Advanced settings**, elegir **Python 3.13**. No hacen falta secrets para
    este paquete público verificado. Puede solicitarse un subdominio disponible,
@@ -255,10 +268,12 @@ configuración de hosting; no modificar pesos ni instalar requisitos ROCm allí.
 
 ## QA y límites de la comprobación
 
-Verificación local con análisis OOF: **43 pruebas superadas, cero fallos y cero omitidas**,
+Verificación final: **55 pruebas superadas, cero fallos y cero omitidas**,
 incluidas las pruebas opcionales con pesos reales (`BREASTDCEDL_TEST_CHECKPOINTS=1`).
 Se han comprobado sin cambios por SHA256 los **566 archivos históricos** inventariados.
 Docker no se ha ejecutado localmente porque este ordenador no dispone del motor.
+El paquete limpio con Python 3.13.7 y dependencias recién instaladas ha pasado
+además sus **11 pruebas portables**, sin necesitar el dataset ni las metadata.
 
 ```powershell
 .\.env\Scripts\python.exe -B -m unittest discover -s tests -p test_app_final.py -v

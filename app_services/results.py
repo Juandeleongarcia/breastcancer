@@ -91,7 +91,7 @@ def read_history(filename):
     return history
 
 
-def aggregate_histories(histories, mode='all', train_column='train_eval_loss'):
+def aggregate_histories(histories, mode='all', train_column='train_eval_loss',val_column='val_loss'):
     """Estadísticas de filas existentes; sin relleno, suavizado ni interpolación.
 
     Una época contribuye si ambas pérdidas están presentes. DE muestral (ddof=1);
@@ -101,16 +101,16 @@ def aggregate_histories(histories, mode='all', train_column='train_eval_loss'):
     if mode == 'common' and set(histories) != set(range(5)): return pd.DataFrame()
     values = []
     for fold, history in histories.items():
-        if not {train_column,'val_loss','epoch'} <= set(history): continue
-        rows = history[['epoch',train_column,'val_loss']].copy().dropna()
+        if not {train_column,val_column,'epoch'} <= set(history): continue
+        rows = history[['epoch',train_column,val_column]].copy().dropna()
         rows['fold'] = fold
-        values.append(rows.rename(columns={train_column:'train'}))
+        values.append(rows.rename(columns={train_column:'train',val_column:'val'}))
     if not values: return pd.DataFrame()
     data = pd.concat(values,ignore_index=True)
     if data.duplicated(['fold','epoch']).any(): raise ValueError('Épocas duplicadas por fold')
-    if not np.isfinite(data[['train','val_loss']].to_numpy()).all(): raise ValueError('Pérdidas no finitas')
+    if not np.isfinite(data[['train','val']].to_numpy()).all(): raise ValueError('Métricas no finitas')
     output = data.groupby('epoch').agg(train_mean=('train','mean'),train_std=('train','std'),
-             val_mean=('val_loss','mean'),val_std=('val_loss','std'),n_folds=('fold','nunique')).reset_index()
+             val_mean=('val','mean'),val_std=('val','std'),n_folds=('fold','nunique')).reset_index()
     return output[output.n_folds.eq(5)].reset_index(drop=True) if mode=='common' else output
 
 

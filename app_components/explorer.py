@@ -38,6 +38,7 @@ def upload_study():
                 st.session_state.last_upload_signature = token
                 st.session_state.slice_pos = 0
                 st.session_state.demo_mode = False
+                st.session_state.study_public = False
                 st.success(f'Estudio validado: {len(study.slice_indices)} cortes, tres fases sincronizadas.')
             except ValueError as error:
                 st.session_state.study = None
@@ -50,7 +51,7 @@ def upload_study():
         st.caption('PNG de 8 bits en gris, 256 × 256. No DICOM, NIfTI, RGB ni un PNG aislado. '
                    'Los cortes deben proceder de un procesamiento compatible con el dataset. '
                    'La app comprueba las tripletas aportadas; no puede verificar la completitud anatómica del estudio original. '
-                   'Se procesan en memoria del servidor local, sin extracción de ZIP ni servicios externos.')
+                   'Se procesan en memoria del servidor de la aplicación, sin extraer el ZIP ni enviar datos a servicios de inferencia externos.')
 
 
 @st.dialog('Detalle del corte',width='large')
@@ -120,7 +121,13 @@ def viewer(study,enable_3d=False):
     a,b,c=st.columns(3)
     x=a.number_input('Centro X (píxel)',0,255,128,key='temporal_x')
     y=b.number_input('Centro Y (píxel)',0,255,128,key='temporal_y')
-    radius=c.slider('Radio de región (píxeles)',0,32,8,key='temporal_radius')
+    radius=c.slider('Semiancho de región cuadrada (píxeles)',0,32,8,key='temporal_radius')
+    with st.expander('Ver la región manual sobre PRE'):
+        figure=charts.image_zoom(study.phases[position,0]/255.,'Región manual · PRE')
+        figure.add_shape(type='rect',x0=max(0,x-radius),x1=min(255,x+radius),
+                         y0=max(0,y-radius),y1=min(255,y+radius),line=dict(color=charts.TEAL,width=2))
+        plot(figure,'temporal_roi')
+        st.caption('Cuadrado seleccionado manualmente para medir intensidades; no representa una máscara o segmentación tumoral.')
     plot(charts.temporal_curve(study,position,int(x),int(y),int(radius)),'temporal_curve')
     st.caption('Se representan tres puntos temporales, sin tiempos físicos ni interpolación fisiológica. La región es una selección manual, no una segmentación tumoral. Brillo y contraste no afectan a esta curva.')
 
@@ -132,11 +139,13 @@ def render():
         from app_services.lab import public_example
         st.session_state.study=public_example(st.session_state.bundle_root)
         st.session_state.slice_pos=0;st.session_state.demo_mode=False
+        st.session_state.study_public=True
     if st.session_state.study is None and st.session_state.catalog is not None and 'demo_mode' not in st.session_state:
         from app_services.lab import public_example
         st.session_state.study=public_example(st.session_state.bundle_root)
         st.session_state.demo_mode=False
-    if st.session_state.catalog is not None:
+        st.session_state.study_public=True
+    if st.session_state.study is not None and st.session_state.get('study_public') and not st.session_state.get('demo_mode'):
         st.caption('Ejemplo público autorizado: BreastDCEDL MinCrop · CC BY-NC 4.0 · Fridman et al. · doi:10.5281/zenodo.18114231. No se suministra etiqueta.')
     study = st.session_state.study
     demo = st.toggle('Demostración sintética del visor',value=study is None,key='demo_mode')

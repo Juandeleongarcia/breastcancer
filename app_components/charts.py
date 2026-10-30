@@ -39,12 +39,12 @@ def conceptual_cnn_figure(selected):
 def style(figure, height=340, title=None):
     figure.update_layout(template='plotly_dark',paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',font=dict(family='Segoe UI, Arial, sans-serif',size=13,color=WHITE),
-        margin=dict(l=35,r=20,t=45 if title else 22,b=38),height=height,
+        margin=dict(l=45,r=25,t=65 if title else 24,b=105),height=height,
         title=dict(text=title,font=dict(size=15)) if title else None,
-        legend=dict(orientation='h',y=1.13,x=0,font=dict(size=12)),
+        legend=dict(orientation='h',y=-.24,x=0,yanchor='top',font=dict(size=11)),
         hoverlabel=dict(bgcolor='#15283B'),hovermode='x unified')
-    figure.update_xaxes(showgrid=False,zeroline=False)
-    figure.update_yaxes(gridcolor='#203146',zeroline=False)
+    figure.update_xaxes(showgrid=False,zeroline=False,automargin=True)
+    figure.update_yaxes(gridcolor='#203146',zeroline=False,automargin=True)
     return figure
 
 
@@ -59,16 +59,19 @@ def history_curve(history, metric):
     comparable = training.startswith('train_eval')
     if training in history:
         figure.add_scatter(x=history.epoch,y=history[training],name='Train eval' if comparable else 'Train online · pesos variables',
-                           mode='lines+markers',line=dict(color=TEAL if comparable else MUTED,dash='solid' if comparable else 'dash'))
+                           mode='lines+markers',marker=dict(size=5),line=dict(color=TEAL if comparable else MUTED,dash='solid' if comparable else 'dash'))
     if validation in history:
-        figure.add_scatter(x=history.epoch,y=history[validation],name='Validación',mode='lines+markers',line=dict(color=PURPLE))
-    style(figure)
+        figure.add_scatter(x=history.epoch,y=history[validation],name='Validación',mode='lines+markers',marker=dict(size=5),line=dict(color=PURPLE,dash='dash'))
+    style(figure,390)
     figure.update_xaxes(title='Época',dtick=1)
-    figure.update_yaxes(title=ylabel,range=[0,1] if metric!='loss' else None,rangemode='tozero')
+    values=np.concatenate([np.asarray(t.y,dtype=float) for t in figure.data]) if figure.data else np.array([0.])
+    finite=values[np.isfinite(values)]
+    upper=max(1.,float(finite.max())*1.08) if finite.size and metric=='loss' else 1.
+    figure.update_yaxes(title=ylabel,range=[0,upper],rangemode='tozero')
     return figure, comparable
 
 
-def mean_loss_curve(table, training_label='Train eval'):
+def mean_loss_curve(table, training_label='Train eval',metric='loss'):
     figure = make_subplots(rows=2,cols=1,shared_xaxes=True,row_heights=[.79,.21],vertical_spacing=.1)
     for name,label,color,fill in [('train',training_label,TEAL,'rgba(66,211,196,.12)'),
                                   ('val','Validación',PURPLE,'rgba(181,169,238,.12)')]:
@@ -78,13 +81,16 @@ def mean_loss_curve(table, training_label='Train eval'):
                            hoverinfo='skip',connectgaps=False,row=1,col=1)
         figure.add_scatter(x=table.epoch,y=upper,mode='lines',line=dict(width=0),fill='tonexty',fillcolor=fill,
                            showlegend=False,hoverinfo='skip',connectgaps=False,row=1,col=1)
-        figure.add_scatter(x=table.epoch,y=table[name+'_mean'],mode='lines+markers',name=label,
-                           line=dict(color=color),customdata=table.n_folds,
+        figure.add_scatter(x=table.epoch,y=table[name+'_mean'],mode='lines+markers',name=label,marker=dict(size=5),
+                           line=dict(color=color,dash='dash' if name=='val' else 'solid'),customdata=table.n_folds,
                            hovertemplate='%{y:.5f} · %{customdata} folds<extra>'+label+'</extra>',row=1,col=1)
     figure.add_bar(x=table.epoch,y=table.n_folds,name='Folds participantes',marker_color='#36526B',
                    showlegend=False,row=2,col=1,hovertemplate='Época %{x}: %{y} folds<extra></extra>')
-    style(figure,height=420)
-    figure.update_yaxes(title='BCE / corte',rangemode='tozero',row=1,col=1)
+    style(figure,height=480)
+    values=np.concatenate([(table[n+'_mean']+table[n+'_std'].fillna(0)).to_numpy() for n in ['train','val']])
+    upper=max(1.,float(values.max())*1.08) if metric=='loss' else 1.
+    figure.update_yaxes(title={'loss':'BCE / corte','auc':'ROC AUC paciente','accuracy':'Accuracy paciente'}[metric],
+                       range=[0,upper],row=1,col=1)
     figure.update_yaxes(title='Folds',dtick=1,range=[0,5.5],row=2,col=1)
     figure.update_xaxes(title='Época',dtick=1,row=2,col=1)
     return figure
@@ -114,13 +120,64 @@ def roc_figure(folds, oof=None):
 def confusion_figure(metrics):
     matrix = metrics['confusion_matrix']
     text = [[f'TN · {matrix[0][0]}',f'FP · {matrix[0][1]}'],[f'FN · {matrix[1][0]}',f'TP · {matrix[1][1]}']]
-    figure = go.Figure(go.Heatmap(z=matrix,x=['no pCR','pCR'],y=['no pCR','pCR'],
-        text=text,texttemplate='%{text}',textfont=dict(size=20),colorscale=[[0,'#12263B'],[1,TEAL]],
-        showscale=False,hovertemplate='Real: %{y}<br>Predicción: %{x}<br>Pacientes: %{z}<extra></extra>'))
-    style(figure,340)
+    figure = go.Figure(go.Heatmap(z=[[1,0],[0,1]],x=['no pCR','pCR'],y=['no pCR','pCR'],customdata=matrix,
+        text=text,texttemplate='%{text}',textfont=dict(size=18,color=WHITE),colorscale=[[0,'#653E50'],[1,'#15574F']],
+        zmin=0,zmax=1,xgap=4,ygap=4,
+        showscale=False,hovertemplate='Real: %{y}<br>Predicción: %{x}<br>Pacientes: %{customdata:d}<extra></extra>'))
+    style(figure,350)
+    figure.update_layout(hovermode='closest',margin=dict(l=65,r=20,t=15,b=65))
     figure.update_xaxes(title='Predicción por paciente')
     figure.update_yaxes(title='Etiqueta real',autorange='reversed')
     return figure
+
+
+def confusion_legend():
+    return ('TN: predice no pCR y es no pCR · FP: predice pCR y es no pCR · '
+            'FN: predice no pCR y es pCR · TP: predice pCR y es pCR. '
+            'Turquesa: aciertos; coral: errores. El color distingue el tipo de resultado, no su frecuencia.')
+
+
+def fold_probabilities(result):
+    values=np.asarray(result['member_probabilities'],dtype=float)
+    if values.shape!=(5,) or not np.isfinite(values).all() or ((values<0)|(values>1)).any():
+        raise ValueError('Se requieren cinco probabilidades válidas de los folds')
+    if not np.isclose(values.mean(),result['patient_probability'],rtol=0,atol=1e-12):
+        raise ValueError('La media del paciente no coincide con los cinco miembros')
+    labels=[f'Fold {fold}' for fold in range(5)]
+    fig=go.Figure(go.Scatter(x=labels,y=values,mode='markers',name='Cada modelo',
+        marker=dict(size=13,color=TEAL,line=dict(color=WHITE,width=1)),
+        hovertemplate='%{x}<br>Puntuación pCR: %{y:.6f}<extra></extra>'))
+    for value,label,color,dash in [(result['patient_probability'],'Media paciente',PURPLE,'solid'),
+                                   (result['threshold'],'Umbral',AMBER,'dash')]:
+        fig.add_scatter(x=labels,y=[value]*5,mode='lines',name=f'{label} · {value:.4f}',
+                        line=dict(color=color,dash=dash),hovertemplate=label+': %{y:.6f}<extra></extra>')
+    style(fig,400,'Cinco modelos · media y umbral de la muestra')
+    fig.update_layout(hovermode='closest')
+    fig.update_xaxes(title='Modelo del fold',type='category',categoryorder='array',categoryarray=labels)
+    fig.update_yaxes(title='Puntuación pCR',range=[0,1])
+    return fig
+
+
+def threshold_curves(report,selected,youden=False):
+    fig=go.Figure()
+    series=[('youden','Youden',TEAL)] if youden else [
+        ('sensitivity','Sensibilidad',TEAL),('specificity','Especificidad',PURPLE),
+        ('precision','Precisión pCR',AMBER),('f1','F1','#85ABD4'),('balanced_accuracy','Balanced accuracy',WHITE)]
+    for metric,label,color in series:
+        fig.add_scatter(x=[r['threshold'] for r in report['thresholds']],y=[r[metric] for r in report['thresholds']],
+            name=label,mode='lines',line=dict(color=color),hovertemplate=label+': %{y:.4f}<extra></extra>')
+    # Referencias como trazas: leyenda debajo, sin anotaciones que tapen las curvas.
+    limits=[-1,1] if youden else [0,1]
+    for value,label,color in [(report['recommended_threshold'],'Exploratorio OOF',TEAL),(.5,'Original',AMBER)]:
+        fig.add_scatter(x=[value,value],y=limits,mode='lines',name=f'{label} {value:.2f}',
+                       line=dict(color=color,dash='dash'),hoverinfo='skip')
+    if selected not in [report['recommended_threshold'],.5]:
+        fig.add_scatter(x=[selected,selected],y=limits,mode='lines',name=f'Explorado {selected:.2f}',
+                       line=dict(color=MUTED,dash='dot'),hoverinfo='skip')
+    style(fig,490,'Índice de Youden · desarrollo OOF' if youden else 'Sensibilidad y métricas · desarrollo OOF')
+    fig.update_xaxes(title='Umbral pCR',range=[.05,.95])
+    fig.update_yaxes(title='Youden = sensibilidad + especificidad − 1' if youden else 'Proporción',range=limits)
+    return fig
 
 
 def fold_auc_figure(report):
@@ -134,7 +191,7 @@ def fold_auc_figure(report):
     for i,value in enumerate(scores):
         if value is None:figure.add_annotation(x=f'Fold {i}',y=.06,text='Pendiente',showarrow=False,font=dict(color=MUTED,size=12))
     style(figure)
-    figure.update_yaxes(title='ROC AUC paciente',range=[0,1.08])
+    figure.update_yaxes(title='ROC AUC paciente',range=[0,1])
     return figure
 
 
@@ -205,7 +262,7 @@ def temporal_curve(study,selected,x,y,radius):
         line=dict(color=TEAL,width=3),marker=dict(size=10),name='Media de la región'))
     style(figure,300,'Tres adquisiciones temporales · intensidad media de la región')
     figure.update_xaxes(title='Fase temporal · sin tiempos de adquisición en segundos')
-    figure.update_yaxes(title='Intensidad PNG [0,1]',range=[0,1])
+    figure.update_yaxes(title='Intensidad normalizada PNG / 255 [0,1]',range=[0,1])
     return figure
 
 
@@ -216,5 +273,3 @@ def image_zoom(image, title, signed=False):
     figure.update_xaxes(title='Píxel x')
     figure.update_yaxes(title='Píxel y',autorange='reversed',scaleanchor='x')
     return figure
-
-

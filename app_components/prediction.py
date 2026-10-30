@@ -1,13 +1,13 @@
 """Demostración privada por sesión: cinco muestras, sin almacenamiento de imágenes."""
 import streamlit as st
 
-from app_components.layout import section,cards,plot,resource,clear_input,next_sample,empty
+from app_components.layout import section,cards,plot,resource,clear_input,next_sample,empty,choose_public_example,reset_defence
 from app_components import charts
 from app_components.explorer import _signed_rgb
 from app_services import lab
 from app_services.thresholds import decision
 from app_components.thresholds import analysis_for
-from app_services.studies import PHASES,study_from_uploads
+from app_services.studies import PHASES,study_from_uploads,MAX_BYTES,MAX_SLICES
 
 
 def render():
@@ -18,11 +18,17 @@ def render():
         empty('Modelos no disponibles','No se puede inferir sin pesos verificados. Consultar el diagnóstico de preparación en la barra lateral.')
         return
     defense=st.session_state.defence;nonce=st.session_state.input_nonce
-    defense_mode=st.toggle('Modo defensa · cinco muestras',value=True,key='defence_mode',disabled=defense.current is not None)
+    st.session_state.setdefault('defence_mode',True)
+    defense_mode=st.toggle('Modo defensa · cinco muestras',key='defence_mode',disabled=defense.current is not None)
     locked=defense_mode and defense.current is not None
     if defense_mode:
         st.progress(len(defense.records)/5,text=f'Muestra {defense.slot} / 5 · {len(defense.records)} resultados registrados')
         st.caption('Imágenes y datos clínicos permanecen en memoria de esta sesión. El registro no incluye archivos, nombres ni identificadores.')
+        st.caption('Sesión técnica: '+defense.session_id)
+    st.button('Probar con un ejemplo público',key='public_example',icon=':material/play_circle:',
+              type='primary',on_click=choose_public_example,disabled=locked,width='stretch')
+    st.caption('Carga una tripleta autorizada de train y selecciona la modalidad de imágenes. '
+               'Puedes pasar a multimodal aportando edad y subtipo. No se carga ninguna etiqueta real.')
     st.html('<div class="b-pipeline"><div class="b-step"><b>01</b><strong>Seleccionar y cargar</strong><span>Modalidad y tres fases</span></div>'
         '<div class="b-step"><b>02</b><strong>Validar y visualizar</strong><span>PNG8 · 256 × 256 · sin reescalado</span></div>'
         '<div class="b-step"><b>03</b><strong>Analizar y registrar</strong><span>Inferencia real · umbral explícito</span></div></div>')
@@ -50,10 +56,12 @@ def render():
     if kind=='multimodal':
         a,b=st.columns(2)
         age=a.number_input('Edad (años)',min_value=0.,max_value=120.,value=None,step=1.,
-            key=f'input_age_{nonce}',disabled=locked,on_change=clear_input)
+            key=f'input_age_{nonce}',disabled=locked,on_change=clear_input,
+            help='Edad de la paciente al estudio basal; el modelo utiliza la transformación ajustada con train de cada fold.')
         subtype=b.selectbox('Subtipo molecular',[None,'HRposHER2neg','TripleNeg','HER2pos','Otro / desconocido'],
             format_func=lambda v:'Seleccionar subtipo' if v is None else v,key=f'input_subtype_{nonce}',
-            disabled=locked,on_change=clear_input)
+            disabled=locked,on_change=clear_input,
+            help='Estado de receptores hormonales (HR) y HER2 del tumor: HRposHER2neg, TripleNeg o HER2pos. No deducirlo de las imágenes.')
         allow_missing=st.checkbox('Declarar explícitamente datos clínicos ausentes',key=f'input_missing_{nonce}',
             disabled=locked,on_change=clear_input)
         clinical_ok=(age is not None and subtype is not None) or allow_missing
@@ -79,7 +87,12 @@ def render():
             items=st.file_uploader('Tripletas de una sola paciente (PNG o un ZIP)',type=['png','zip'],
                 accept_multiple_files=True,key=f'upload_{nonce}_advanced',disabled=locked,on_change=clear_input)
             st.caption('Nombres PACIENTE_z012_PRE.png / EARLY / LATE. Todos los índices z deben tener sus tres fases. Máximo 256 cortes y 128 MiB; no se extrae el ZIP.')
-            if items:study=study_from_uploads([(item.name,item.getvalue()) for item in items])
+            if items:
+                if len(items)>3*MAX_SLICES or sum(item.size for item in items)>MAX_BYTES:
+                    raise ValueError('El estudio supera 256 cortes o 128 MiB; reduce la selección antes de analizar')
+                if any(item.name.lower().endswith('.png') and item.size>1024*1024 for item in items):
+                    raise ValueError('Cada PNG debe ocupar como máximo 1 MiB')
+                study=study_from_uploads([(item.name,item.getvalue()) for item in items])
         else:
             study=lab.public_example(st.session_state.bundle_root)
             example=catalog['example']
@@ -104,8 +117,13 @@ def render():
     result=st.session_state.prediction
     if result is not None and result.get('input_key')!=key:result=None;st.session_state.prediction=None
     st.subheader('3 · Ejecutar inferencia')
+    cards([('Modalidad','Multimodal' if kind=='multimodal' else 'Imágenes','SPATIAL_SMALL · CNN propia'),
+           ('Umbral',f'{threshold:.2f}','pCR si puntuación ≥ umbral'),
+           ('Imágenes',len(study.slice_indices)*3 if study else 0,f'{len(study.slice_indices) if study else 0} cortes × 3 fases'),
+           ('Modelos',len(catalog['modalities'][kind]['members']),'Cinco folds independientes · CPU')])
+    can_analyze=study is not None and clinical_ok and not locked and (not defense_mode or len(defense.records)<5)
     if st.button('Analizar muestra',key='analyze',type='primary',icon=':material/biotech:',width='stretch',
-                 disabled=study is None or not clinical_ok or locked or (defense_mode and len(defense.records)>=5)) and not locked:
+                 disabled=not can_analyze) and can_analyze:
         try:
             with st.spinner('Cargando modelos verificados y ejecutando inferencia…'):
                 bundle=resource(st.session_state.bundle_root,kind,catalog['modalities'][kind]['checksum'])
@@ -128,6 +146,10 @@ def render():
             cards([('Modelos',result['n_models'],result['model']),('Tiempo',f"{result['seconds']:.3f} s",'Inferencia y transformación; sin carga inicial')])
             st.caption(f"Dispositivo: {result['device']} · Cortes: {result['n_slices']} · SHA256: {result['checksum']}")
         st.info('Estimación experimental, sin intervalo de confianza clínico validado. No equivale a supervivencia o curación ni debe cambiar decisiones terapéuticas.')
+        st.subheader('Cómo se obtiene la puntuación final')
+        plot(charts.fold_probabilities(result),'fold_probabilities')
+        st.caption('Cada punto es la media de los cortes aportados para un modelo. La línea violeta es la media de los cinco miembros; '
+                   'la línea discontinua es el umbral de decisión. Su rango es dispersión descriptiva, no confianza estadística.')
         if kind=='multimodal' and catalog['external']['metrics']['recall']==0:
             st.warning('Limitación observada: en el test externo guardado, la sensibilidad para pCR fue 0 % con el umbral 0,50. Un AUC superior al azar no garantiza detectar pCR con este umbral.')
         with st.expander('Trazabilidad de la predicción'):
@@ -136,8 +158,10 @@ def render():
             st.dataframe([dict(fold=m['fold'],epoca=m['epoch'],parametros=m['parameters'],
                 sha256_origen=m['original_sha256'],probabilidad=result['member_probabilities'][m['fold']])
                 for m in catalog['modalities'][kind]['members']],hide_index=True,width='stretch')
-            plot(charts.slice_probabilities(dict(slices=result['slices'],patient_probability=result['patient_probability'],threshold=result['threshold'])),
-                 'slice_probabilities')
+            if result['n_slices']>1:
+                plot(charts.slice_probabilities(dict(slices=result['slices'],patient_probability=result['patient_probability'],threshold=result['threshold'])),
+                     'slice_probabilities')
+            else:st.caption('Un solo corte: no hay una secuencia de cortes que representar.')
         if defense_mode:
             label=st.selectbox('Etiqueta real · solo si el profesor ya la ha revelado',[None,0,1],
                 format_func=lambda v:'Aún no revelada' if v is None else ('0 · no pCR' if v==0 else '1 · pCR'),key=f'reveal_{nonce}')
@@ -149,7 +173,19 @@ def render():
             if len(defense.records)==5:st.success('Las cinco muestras están registradas. Descarga el CSV antes de cerrar la sesión.')
     if defense.records:
         st.subheader('Registro de la defensa · esta sesión')
-        st.dataframe(defense.records,hide_index=True,width='stretch')
+        visible=[dict(Muestra=r['muestra'],Puntuación=r['probabilidad_pcr'],
+            Clase='pCR' if r['clase_predicha'] else 'no pCR',Umbral=r['umbral'],
+            Real='Pendiente' if r['etiqueta_real'] is None else ('pCR' if r['etiqueta_real'] else 'no pCR'),
+            Fecha_hora=r['timestamp']) for r in defense.records]
+        st.dataframe(visible,hide_index=True,width='stretch',column_config={
+            'Puntuación':st.column_config.NumberColumn(format='%.6f'),'Umbral':st.column_config.NumberColumn(format='%.2f')})
+        with st.expander('Registro técnico completo'):
+            st.dataframe(defense.records,hide_index=True,width='stretch')
         st.download_button('Descargar resultados de la defensa (CSV)',defense.csv(),file_name='defensa_cinco_muestras.csv',
             mime='text/csv',key='download_defence')
         st.caption('Cinco muestras prueban el funcionamiento; no estiman de forma fiable el rendimiento clínico. Las etiquetas reveladas nunca se utilizan para ajustar parámetros.')
+    with st.expander('Reiniciar la sesión de defensa'):
+        st.caption('Borra únicamente las entradas y el registro en memoria de esta sesión. Descarga el CSV antes de reiniciar. '
+                   'Los modelos y resultados históricos se conservan.')
+        confirmed=st.checkbox('Confirmo que quiero reiniciar la sesión y descartar su registro en memoria',key='confirm_reset_defence')
+        st.button('Reiniciar sesión de defensa',key='reset_defence',disabled=not confirmed,on_click=reset_defence)
